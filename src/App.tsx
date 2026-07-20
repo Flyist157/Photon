@@ -468,27 +468,39 @@ function App() {
           </div>
 
           <div className="gallery-grid">
-            {photos.map((photo) => (
-              <article className="photo-card" key={photo.id}>
-                <img src={photo.dataUrl} alt={`Photon HDR output ${photo.angleLabel}`} />
-                <div className="photo-meta">
-                  <div>
-                    <strong>{photo.angleLabel}</strong>
-                    <p>{photo.editSummary}</p>
-                    <p>
-                      Detected: {photo.detectedContent.tags.join(', ')} • {photo.detectedContent.lighting} •{' '}
-                      {photo.detectedContent.colorCast} color
-                    </p>
-                    <p>Edits: {photo.correctionPlan.reasons.slice(1).join(' • ')}</p>
-                    <span>
-                      {photo.bracketCount} HDR brackets • {photo.width}×{photo.height} upscaled JPG •{' '}
-                      {photo.qualityScore}% output confidence
-                    </span>
+            {photos.map((photo) => {
+              const detectedContent = photo.detectedContent
+              const correctionReasons = photo.correctionPlan?.reasons.slice(1) ?? []
+
+              return (
+                <article className="photo-card" key={photo.id}>
+                  <img src={photo.dataUrl} alt={`Photon HDR output ${photo.angleLabel}`} />
+                  <div className="photo-meta">
+                    <div>
+                      <strong>{photo.angleLabel}</strong>
+                      <p>{photo.editSummary}</p>
+                      <p>
+                        Detected:{' '}
+                        {detectedContent
+                          ? `${detectedContent.tags.join(', ')} • ${detectedContent.lighting} • ${detectedContent.colorCast} color`
+                          : 'photo content awaiting analysis'}
+                      </p>
+                      <p>
+                        Edits:{' '}
+                        {correctionReasons.length
+                          ? correctionReasons.join(' • ')
+                          : 'HDR merge, color correction, sharpening, and export upscaling'}
+                      </p>
+                      <span>
+                        {photo.bracketCount} HDR brackets • {photo.width}×{photo.height} upscaled JPG •{' '}
+                        {photo.qualityScore}% output confidence
+                      </span>
+                    </div>
+                    <button onClick={() => downloadImage(photo)}>Download</button>
                   </div>
-                  <button onClick={() => downloadImage(photo)}>Download</button>
-                </div>
-              </article>
-            ))}
+                </article>
+              )
+            })}
           </div>
 
           <div className="button-row">
