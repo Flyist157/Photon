@@ -306,9 +306,13 @@ button.secondary {
 .photo-meta {
   padding: 0.7rem;
   display: flex;
+  flex-direction: column;
   gap: 0.7rem;
-  justify-content: space-between;
-  align-items: center;
+  align-items: stretch;
+}
+
+.photo-meta button {
+  align-self: flex-start;
 }
 
 .photo-meta p,
