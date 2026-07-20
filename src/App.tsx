@@ -475,8 +475,14 @@ function App() {
                   <div>
                     <strong>{photo.angleLabel}</strong>
                     <p>{photo.editSummary}</p>
+                    <p>
+                      Detected: {photo.detectedContent.tags.join(', ')} • {photo.detectedContent.lighting} •{' '}
+                      {photo.detectedContent.colorCast} color
+                    </p>
+                    <p>Edits: {photo.correctionPlan.reasons.slice(1).join(' • ')}</p>
                     <span>
-                      {photo.bracketCount} HDR brackets • {photo.qualityScore}% output confidence
+                      {photo.bracketCount} HDR brackets • {photo.width}×{photo.height} upscaled JPG •{' '}
+                      {photo.qualityScore}% output confidence
                     </span>
                   </div>
                   <button onClick={() => downloadImage(photo)}>Download</button>

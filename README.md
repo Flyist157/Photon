@@ -24,8 +24,9 @@ Photon is a mobile-first real-estate imaging app that guides a user to the best 
 
 5. **Generates listing-ready photos**
    - Merges HDR brackets.
-   - Applies white balance, exposure/contrast tuning, color correction, warmth, and sharpening.
-   - Exports 16:9 JPGs with one-click download.
+   - Recognizes scene cues such as windows, floor plane, architectural lines, lighting range, color cast, shadow risk, and highlight risk.
+   - Builds a non-generative edit plan for white balance, exposure, shadows, highlights, vibrance, denoise, clarity, and sharpening.
+   - Upscales the corrected output to 2400×1350 JPGs with one-click download.
 
 ## Run locally
 
@@ -41,4 +42,5 @@ Then open the app in a mobile browser on the same network and grant camera permi
 - Photon now focuses on guided capture and professional photo enhancement rather than 3D reconstruction.
 - Browser camera APIs do not reliably expose physical wide-lens selection or manual exposure control across phones, so HDR brackets are simulated from captured frames when needed.
 - Output quality depends on phone camera quality, room lighting, lens cleanliness, and steady landscape capture.
+- Photon only performs non-generative editing: light, color, white balance, denoise, sharpening, and upscaling. It does not add, remove, replace, or stage room contents.
 - The AI backend is currently a deterministic in-browser inference layer, so the app works without external credentials or network calls. It is structured around typed review and edit-plan outputs that can be replaced by a hosted model endpoint.

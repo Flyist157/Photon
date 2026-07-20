@@ -58,6 +58,33 @@ export type PhotoEditPlan = {
   retouchInstructions: string[]
 }
 
+export type DetectedPhotoContent = {
+  tags: string[]
+  lighting: 'underexposed' | 'balanced' | 'overexposed' | 'high-dynamic-range'
+  colorCast: 'cool' | 'neutral' | 'warm' | 'green' | 'magenta'
+  detailLevel: 'low' | 'moderate' | 'high'
+  windowConfidence: number
+  shadowRisk: number
+  highlightRisk: number
+}
+
+export type AiCorrectionPlan = {
+  exposureLift: number
+  shadowLift: number
+  highlightRecovery: number
+  whiteBalance: {
+    redGain: number
+    greenGain: number
+    blueGain: number
+  }
+  vibrance: number
+  clarity: number
+  denoise: number
+  sharpen: number
+  upscaleMultiplier: number
+  reasons: string[]
+}
+
 export type PhotoBrief = {
   shotId: string
   label: string
@@ -82,4 +109,6 @@ export type StyledPhoto = {
   editSummary: string
   qualityScore: number
   bracketCount: number
+  detectedContent: DetectedPhotoContent
+  correctionPlan: AiCorrectionPlan
 }
