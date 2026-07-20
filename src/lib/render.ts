@@ -1,5 +1,5 @@
-import { clamp } from './image'
-import type { PhotoBrief, PhotoEditPlan, RoomModel, StyledPhoto } from '../types'
+import { clamp, loadImage } from './image'
+import type { CapturedFrame, PhotoBrief, PhotoEditPlan, RoomModel, StyledPhoto } from '../types'
 
 type CameraPose = {
   yaw: number
@@ -44,6 +44,11 @@ const rotateX = (y: number, z: number, pitch: number): [number, number] => {
 }
 
 const clearBackground = (ctx: CanvasRenderingContext2D, width: number, height: number, color: string): void => {
+  if (color === 'transparent') {
+    ctx.clearRect(0, 0, width, height)
+    return
+  }
+
   ctx.fillStyle = color
   ctx.fillRect(0, 0, width, height)
 }
@@ -187,6 +192,43 @@ const applyRealEstateLook = (
   ctx.putImageData(sharpened, 0, 0)
 }
 
+const normalizeDegrees = (degrees: number): number => {
+  const normalized = degrees % 360
+  return normalized < 0 ? normalized + 360 : normalized
+}
+
+const circularDistanceDegrees = (a: number, b: number): number => {
+  const distance = Math.abs(normalizeDegrees(a) - normalizeDegrees(b))
+  return Math.min(distance, 360 - distance)
+}
+
+const findClosestSourceFrame = (frames: CapturedFrame[], yawDegrees: number): CapturedFrame | null => {
+  if (!frames.length) {
+    return null
+  }
+
+  const targetHeading = normalizeDegrees(yawDegrees)
+  return frames.reduce((closest, frame) =>
+    circularDistanceDegrees(frame.heading, targetHeading) < circularDistanceDegrees(closest.heading, targetHeading)
+      ? frame
+      : closest,
+  )
+}
+
+const drawCoverImage = (
+  ctx: CanvasRenderingContext2D,
+  image: HTMLImageElement,
+  width: number,
+  height: number,
+): void => {
+  const scale = Math.max(width / image.width, height / image.height)
+  const drawWidth = image.width * scale
+  const drawHeight = image.height * scale
+  const offsetX = (width - drawWidth) / 2
+  const offsetY = (height - drawHeight) / 2
+  ctx.drawImage(image, offsetX, offsetY, drawWidth, drawHeight)
+}
+
 export const renderInteractivePreview = (
   canvas: HTMLCanvasElement,
   model: RoomModel,
@@ -215,7 +257,7 @@ export const renderInteractivePreview = (
   )
 }
 
-const synthesizePhoto = (
+const synthesizePhoto = async (
   model: RoomModel,
   yawDegrees: number,
   width: number,
@@ -223,7 +265,7 @@ const synthesizePhoto = (
   label: string,
   editPlan: PhotoEditPlan = DEFAULT_EDIT_PLAN,
   brief?: PhotoBrief,
-): StyledPhoto => {
+): Promise<StyledPhoto> => {
   const canvas = document.createElement('canvas')
   canvas.width = width
   canvas.height = height
@@ -232,22 +274,60 @@ const synthesizePhoto = (
     throw new Error('Unable to initialize rendering surface for synthesized photo.')
   }
 
-  renderModel(
-    ctx,
-    model,
-    {
-      yaw: toRadians(yawDegrees),
-      pitch: toRadians(-4 + editPlan.verticalCorrection * 10),
-      distance: 8,
-      fovDegrees: 48,
-    },
-    {
-      width,
-      height,
-      background: '#fafafa',
-      pointSize: 2,
-    },
-  )
+  const sourceFrame = findClosestSourceFrame(model.sourceFrameData, yawDegrees)
+  if (sourceFrame) {
+    try {
+      const image = await loadImage(sourceFrame.imageDataUrl)
+      drawCoverImage(ctx, image, width, height)
+
+      const overlay = document.createElement('canvas')
+      overlay.width = width
+      overlay.height = height
+      const overlayCtx = overlay.getContext('2d')
+      if (overlayCtx) {
+        renderModel(
+          overlayCtx,
+          model,
+          {
+            yaw: toRadians(yawDegrees),
+            pitch: toRadians(-4 + editPlan.verticalCorrection * 10),
+            distance: 8,
+            fovDegrees: 48,
+          },
+          {
+            width,
+            height,
+            background: 'transparent',
+            pointSize: 2,
+          },
+        )
+        ctx.globalAlpha = 0.22
+        ctx.globalCompositeOperation = 'soft-light'
+        ctx.drawImage(overlay, 0, 0)
+        ctx.globalAlpha = 1
+        ctx.globalCompositeOperation = 'source-over'
+      }
+    } catch {
+      clearBackground(ctx, width, height, '#fafafa')
+    }
+  } else {
+    renderModel(
+      ctx,
+      model,
+      {
+        yaw: toRadians(yawDegrees),
+        pitch: toRadians(-4 + editPlan.verticalCorrection * 10),
+        distance: 8,
+        fovDegrees: 48,
+      },
+      {
+        width,
+        height,
+        background: '#fafafa',
+        pointSize: 2,
+      },
+    )
+  }
 
   applyRealEstateLook(ctx, width, height, editPlan)
 
@@ -262,7 +342,7 @@ const synthesizePhoto = (
   }
 }
 
-export const generateListingPhotos = (
+export const generateListingPhotos = async (
   model: RoomModel,
   editPlan: PhotoEditPlan = DEFAULT_EDIT_PLAN,
   photoBriefs: PhotoBrief[] = [
@@ -270,7 +350,7 @@ export const generateListingPhotos = (
     { label: 'Center Angle', yawDegrees: 0, purpose: 'primary room overview' },
     { label: 'Right Angle', yawDegrees: 35, purpose: 'opposite side perspective for room depth' },
   ],
-): StyledPhoto[] =>
-  photoBriefs.map((brief) =>
+): Promise<StyledPhoto[]> =>
+  Promise.all(photoBriefs.map((brief) =>
     synthesizePhoto(model, brief.yawDegrees, 1600, 900, brief.label, editPlan, brief),
-  )
+  ))

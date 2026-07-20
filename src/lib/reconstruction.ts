@@ -103,6 +103,7 @@ export const buildRoomModel = async (frames: CapturedFrame[]): Promise<RoomModel
 
   return {
     points,
+    sourceFrameData: frames,
     sourceFrames: frames.length,
     generatedAt: Date.now(),
   }

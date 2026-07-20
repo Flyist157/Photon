@@ -18,6 +18,7 @@ export type Point3D = {
 
 export type RoomModel = {
   points: Point3D[]
+  sourceFrameData: CapturedFrame[]
   sourceFrames: number
   generatedAt: number
 }

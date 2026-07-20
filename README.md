@@ -28,7 +28,8 @@ Photon is a mobile-first real-estate imaging app that guides a user through a 36
    - Produces a structured edit plan and marketing prompt from the captured scene and user instructions.
 
 6. **Synthesizes three listing angles**
-   - Renders the 3D model into hero, natural-light, and architectural-depth listing photos.
+   - Selects the nearest real camera frame for each angle as the photoreal base image.
+   - Layers model-aware color/depth context into hero, natural-light, and architectural-depth listing photos.
 
 7. **Post-produces each image**
    - Applies prompt-aware white balance, exposure/contrast tuning, warmth, color enhancement, and sharpening.

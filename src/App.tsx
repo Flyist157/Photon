@@ -318,7 +318,7 @@ function App() {
       setError(null)
       const model = await buildRoomModel(frames)
       const aiPipelineResult = await mapSpaceWithAiBackend(frames, model, imagingRequest)
-      const listingPhotos = generateListingPhotos(model, aiPipelineResult.editPlan, aiPipelineResult.photoBriefs)
+      const listingPhotos = await generateListingPhotos(model, aiPipelineResult.editPlan, aiPipelineResult.photoBriefs)
       setRoomModel(model)
       setAiResult(aiPipelineResult)
       setPhotos(listingPhotos)
