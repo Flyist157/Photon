@@ -1,0 +1,274 @@
+.app-shell {
+  max-width: 840px;
+  margin: 0 auto;
+  padding: 1rem 1rem 2rem;
+  display: grid;
+  gap: 1rem;
+}
+
+.card {
+  border: 1px solid #d8dde8;
+  border-radius: 14px;
+  background: #fff;
+  padding: 1rem;
+  box-shadow: 0 10px 24px rgba(9, 30, 66, 0.08);
+}
+
+h1,
+h2 {
+  margin: 0 0 0.6rem;
+}
+
+p {
+  margin: 0;
+  color: #3f4b5e;
+}
+
+.hint {
+  font-size: 0.92rem;
+  margin-bottom: 0.8rem;
+}
+
+.prompt-panel {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0.9rem 0;
+  padding: 0.85rem;
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  background: #eff6ff;
+}
+
+label {
+  display: grid;
+  gap: 0.35rem;
+  color: #1e293b;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+select,
+textarea {
+  width: 100%;
+  border: 1px solid #bfd0e4;
+  border-radius: 10px;
+  padding: 0.65rem;
+  color: #0f172a;
+  background: #fff;
+  font: inherit;
+}
+
+textarea {
+  resize: vertical;
+}
+
+.preview-wrap {
+  margin: 0.8rem 0;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #121923;
+}
+
+video {
+  width: 100%;
+  aspect-ratio: 9 / 16;
+  object-fit: cover;
+  display: block;
+}
+
+.guidance-card {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0.85rem 0;
+  padding: 0.85rem;
+  border-radius: 12px;
+  border: 1px solid #dbe3ee;
+  background: #f8fafc;
+}
+
+.guidance-card strong,
+.ai-report strong {
+  display: block;
+  margin: 0.2rem 0;
+  color: #0f172a;
+}
+
+.guidance-card.good {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
+
+.guidance-card.action {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+}
+
+.guidance-card.warning {
+  border-color: #fed7aa;
+  background: #fff7ed;
+}
+
+.eyebrow {
+  color: #2563eb;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.guidance-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.guidance-stats span {
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.08);
+  padding: 0.35rem 0.55rem;
+  color: #1e293b;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.progress-track {
+  height: 12px;
+  border-radius: 999px;
+  background: #e5e7eb;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #2563eb, #06b6d4);
+  transition: width 180ms ease;
+}
+
+.meta-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.8rem;
+  margin: 0.55rem 0 0.8rem;
+  font-size: 0.9rem;
+  color: #334155;
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 0.65rem;
+}
+
+button {
+  border: none;
+  border-radius: 10px;
+  padding: 0.65rem 0.9rem;
+  background: #0f172a;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+button.primary {
+  background: #2563eb;
+}
+
+button.secondary {
+  background: #475569;
+}
+
+.error-banner {
+  border: 1px solid #fecaca;
+  background: #fff1f2;
+  color: #9f1239;
+  border-radius: 12px;
+  padding: 0.75rem 0.9rem;
+}
+
+.center {
+  text-align: center;
+}
+
+.model-preview {
+  width: 100%;
+  border-radius: 12px;
+  margin: 0.8rem 0 1rem;
+  background: #0f172a;
+  display: block;
+}
+
+.ai-report {
+  display: grid;
+  gap: 0.7rem;
+  margin-bottom: 1rem;
+  padding: 0.9rem;
+  border: 1px solid #c7d2fe;
+  border-radius: 12px;
+  background: #eef2ff;
+}
+
+.ai-report ul {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: #334155;
+}
+
+.palette-row {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.palette-row span {
+  width: 34px;
+  height: 34px;
+  border: 2px solid rgba(255, 255, 255, 0.8);
+  border-radius: 999px;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.22);
+}
+
+.prompt-output {
+  border-left: 3px solid #2563eb;
+  padding-left: 0.7rem;
+  font-weight: 700;
+}
+
+.gallery-grid {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.photo-card {
+  border: 1px solid #dbe3ee;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #f8fafc;
+}
+
+.photo-card img {
+  width: 100%;
+  display: block;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+}
+
+.photo-meta {
+  padding: 0.7rem;
+  display: flex;
+  gap: 0.7rem;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.photo-meta p,
+.photo-meta span {
+  display: block;
+  margin-top: 0.2rem;
+  color: #475569;
+  font-size: 0.78rem;
+}
