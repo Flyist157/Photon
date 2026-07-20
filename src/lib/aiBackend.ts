@@ -1,14 +1,14 @@
 import { clamp, drawToCanvas, loadImage } from './image'
 import type {
-  AiPipelineResult,
+  AiPhotoSessionResult,
   CaptureGuidance,
   CapturedFrame,
   ImagingRequest,
   PhotoBrief,
   PhotoEditPlan,
-  RoomModel,
-  SpaceMap,
-  SpaceFeature,
+  SessionInsight,
+  ShotPosition,
+  ShotStatus,
 } from '../types'
 
 type ImageStats = {
@@ -17,15 +17,12 @@ type ImageStats = {
   saturation: number
   warmth: number
   edgeDensity: number
-  topBrightness: number
-  middleBrightness: number
-  bottomBrightness: number
   palette: string[]
 }
 
 const DEFAULT_REQUEST: ImagingRequest = {
   roomType: 'Interior room',
-  listingGoal: 'Create bright, photorealistic real-estate listing images that make the room feel spacious and true to life.',
+  listingGoal: 'Create bright, accurate, professional real-estate photos that make the room feel spacious and true to life.',
   stylePreset: 'MLS Clean',
 }
 
@@ -44,13 +41,7 @@ const analyzeImageData = (imageData: ImageData): ImageStats => {
   let brightnessSquared = 0
   let saturation = 0
   let warmth = 0
-  let topBrightness = 0
-  let middleBrightness = 0
-  let bottomBrightness = 0
-  let topCount = 0
-  let middleCount = 0
-  let bottomCount = 0
-  const bands = [
+  const paletteBuckets = [
     { r: 0, g: 0, b: 0, count: 0 },
     { r: 0, g: 0, b: 0, count: 0 },
     { r: 0, g: 0, b: 0, count: 0 },
@@ -63,33 +54,18 @@ const analyzeImageData = (imageData: ImageData): ImageStats => {
       const luma = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255
       const max = Math.max(r, g, b)
       const min = Math.min(r, g, b)
-      const bandIndex = clamp(Math.floor((y / height) * bands.length), 0, bands.length - 1)
-      const band = bands[bandIndex]
+      const bucket = paletteBuckets[clamp(Math.floor((luma * paletteBuckets.length)), 0, paletteBuckets.length - 1)]
 
       brightness += luma
       brightnessSquared += luma * luma
       saturation += max === 0 ? 0 : (max - min) / max
       warmth += (r - b) / 255
-      band.r += r
-      band.g += g
-      band.b += b
-      band.count += 1
-
-      if (y < height * 0.34) {
-        topBrightness += luma
-        topCount += 1
-      } else if (y < height * 0.68) {
-        middleBrightness += luma
-        middleCount += 1
-      } else {
-        bottomBrightness += luma
-        bottomCount += 1
-      }
+      bucket.r += r
+      bucket.g += g
+      bucket.b += b
+      bucket.count += 1
     }
   }
-
-  brightness /= pixelCount
-  brightnessSquared /= pixelCount
 
   let edgeTotal = 0
   let edgeSamples = 0
@@ -106,16 +82,18 @@ const analyzeImageData = (imageData: ImageData): ImageStats => {
     }
   }
 
+  brightness /= pixelCount
+  brightnessSquared /= pixelCount
+
   return {
     brightness,
     contrast: Math.sqrt(Math.max(0, brightnessSquared - brightness * brightness)),
     saturation: saturation / pixelCount,
     warmth: warmth / pixelCount,
     edgeDensity: edgeSamples ? edgeTotal / edgeSamples : 0,
-    topBrightness: topBrightness / Math.max(1, topCount),
-    middleBrightness: middleBrightness / Math.max(1, middleCount),
-    bottomBrightness: bottomBrightness / Math.max(1, bottomCount),
-    palette: bands.map((band) => rgbToHex(band.r / Math.max(1, band.count), band.g / Math.max(1, band.count), band.b / Math.max(1, band.count))),
+    palette: paletteBuckets
+      .filter((bucket) => bucket.count > 0)
+      .map((bucket) => rgbToHex(bucket.r / bucket.count, bucket.g / bucket.count, bucket.b / bucket.count)),
   }
 }
 
@@ -137,9 +115,6 @@ const averageStats = (stats: ImageStats[]): ImageStats => {
       saturation: acc.saturation + item.saturation,
       warmth: acc.warmth + item.warmth,
       edgeDensity: acc.edgeDensity + item.edgeDensity,
-      topBrightness: acc.topBrightness + item.topBrightness,
-      middleBrightness: acc.middleBrightness + item.middleBrightness,
-      bottomBrightness: acc.bottomBrightness + item.bottomBrightness,
       palette: [...acc.palette, ...item.palette],
     }),
     {
@@ -148,9 +123,6 @@ const averageStats = (stats: ImageStats[]): ImageStats => {
       saturation: 0,
       warmth: 0,
       edgeDensity: 0,
-      topBrightness: 0,
-      middleBrightness: 0,
-      bottomBrightness: 0,
       palette: [] as string[],
     },
   )
@@ -161,153 +133,134 @@ const averageStats = (stats: ImageStats[]): ImageStats => {
     saturation: sum.saturation / total,
     warmth: sum.warmth / total,
     edgeDensity: sum.edgeDensity / total,
-    topBrightness: sum.topBrightness / total,
-    middleBrightness: sum.middleBrightness / total,
-    bottomBrightness: sum.bottomBrightness / total,
     palette: Array.from(new Set(sum.palette)).slice(0, 5),
   }
 }
 
-const coverageScore = (frames: CapturedFrame[]): number => {
-  if (frames.length < 2) {
-    return 0
-  }
+export const buildGuidedShotPlan = (request: ImagingRequest): ShotPosition[] => [
+  {
+    id: 'hero-corner',
+    label: 'Hero corner wide',
+    targetHeading: 0,
+    placement: 'Stand in the cleanest back corner or doorway, phone at chest height, held landscape.',
+    composition: `Show the widest view of the ${request.roomType.toLowerCase()} with two walls and as much floor as possible.`,
+    coaching: 'Step back until vertical lines feel straight; avoid pointing down at the floor.',
+    priority: 'required',
+  },
+  {
+    id: 'window-pull',
+    label: 'Window-balanced HDR',
+    targetHeading: 45,
+    placement: 'Stand diagonally opposite the main window or brightest wall.',
+    composition: 'Include the window edge without aiming directly into glare.',
+    coaching: 'Tap the phone screen near the window if your browser supports exposure lock, then capture.',
+    priority: 'required',
+  },
+  {
+    id: 'opposite-corner',
+    label: 'Opposite corner depth',
+    targetHeading: 180,
+    placement: 'Move to the opposite corner from the hero shot.',
+    composition: 'Capture depth back toward the entry path so buyers understand the room shape.',
+    coaching: 'Keep the phone level and include a small strip of ceiling for scale.',
+    priority: 'required',
+  },
+  {
+    id: 'entry-context',
+    label: 'Entry context',
+    targetHeading: 250,
+    placement: 'Stand just outside or inside the room entrance.',
+    composition: 'Frame the room from the way a buyer first walks in.',
+    coaching: 'Back up until the doorway or transition is visible but not blocking the main view.',
+    priority: 'recommended',
+  },
+  {
+    id: 'feature-detail',
+    label: 'Feature detail',
+    targetHeading: 315,
+    placement: 'Move near the best selling feature: fireplace, cabinetry, window, fixture, or built-in.',
+    composition: 'Capture a tasteful supporting angle, not a close-up crop.',
+    coaching: 'Keep the feature in the center third and leave enough surrounding room context.',
+    priority: 'recommended',
+  },
+]
 
-  const headings = [...frames.map((frame) => frame.heading)].sort((a, b) => a - b)
-  const gaps = headings.map((heading, index) => {
-    const next = headings[(index + 1) % headings.length]
-    return index === headings.length - 1 ? next + 360 - heading : next - heading
+export const summarizeShotStatuses = (
+  shotPlan: ShotPosition[],
+  frames: CapturedFrame[],
+): ShotStatus[] =>
+  shotPlan.map((shot) => {
+    const capturedBrackets = frames.filter((frame) => frame.shotId === shot.id).length
+    return {
+      ...shot,
+      capturedBrackets,
+      complete: capturedBrackets >= 3,
+    }
   })
-  const largestGap = Math.max(...gaps)
-  const frameScore = clamp(frames.length / 8, 0, 1)
-  const gapScore = clamp(1 - Math.max(0, largestGap - 65) / 180, 0, 1)
-  return Math.round((frameScore * 0.55 + gapScore * 0.45) * 100)
-}
-
-const estimateDimensions = (model: RoomModel): SpaceMap['estimatedDimensions'] => {
-  const bounds = model.points.reduce(
-    (acc, point) => ({
-      minX: Math.min(acc.minX, point.x),
-      maxX: Math.max(acc.maxX, point.x),
-      minY: Math.min(acc.minY, point.y),
-      maxY: Math.max(acc.maxY, point.y),
-      minZ: Math.min(acc.minZ, point.z),
-      maxZ: Math.max(acc.maxZ, point.z),
-    }),
-    {
-      minX: Number.POSITIVE_INFINITY,
-      maxX: Number.NEGATIVE_INFINITY,
-      minY: Number.POSITIVE_INFINITY,
-      maxY: Number.NEGATIVE_INFINITY,
-      minZ: Number.POSITIVE_INFINITY,
-      maxZ: Number.NEGATIVE_INFINITY,
-    },
-  )
-
-  return {
-    widthMeters: Number(clamp(bounds.maxX - bounds.minX, 2.4, 12).toFixed(1)),
-    depthMeters: Number(clamp(bounds.maxZ - bounds.minZ, 2.4, 12).toFixed(1)),
-    heightMeters: Number(clamp(bounds.maxY - bounds.minY, 2.2, 3.4).toFixed(1)),
-    confidence: clamp(model.sourceFrames / 10 + model.points.length / 140000, 0.42, 0.92),
-  }
-}
-
-const detectFeatures = (stats: ImageStats): SpaceFeature[] => {
-  const features: SpaceFeature[] = []
-  if (stats.topBrightness - stats.middleBrightness > 0.12 || stats.brightness > 0.62) {
-    features.push({
-      label: 'natural light source',
-      confidence: clamp(0.56 + stats.topBrightness * 0.34, 0, 0.94),
-      evidence: 'upper-frame brightness suggests windows or strong daylight',
-    })
-  }
-
-  if (stats.edgeDensity > 0.08) {
-    features.push({
-      label: 'architectural detail',
-      confidence: clamp(0.52 + stats.edgeDensity * 2.2, 0, 0.93),
-      evidence: 'edge density indicates trim, cabinetry, shelving, or furniture lines',
-    })
-  }
-
-  if (stats.bottomBrightness < stats.middleBrightness - 0.06) {
-    features.push({
-      label: 'defined flooring plane',
-      confidence: clamp(0.58 + (stats.middleBrightness - stats.bottomBrightness), 0, 0.9),
-      evidence: 'lower-frame tonal separation creates a clear floor boundary',
-    })
-  }
-
-  if (stats.warmth > 0.05) {
-    features.push({
-      label: 'warm interior finishes',
-      confidence: clamp(0.55 + stats.warmth * 1.8, 0, 0.9),
-      evidence: 'red/yellow channel balance suggests wood, warm paint, or incandescent fixtures',
-    })
-  }
-
-  return features.length
-    ? features
-    : [
-        {
-          label: 'clean room envelope',
-          confidence: 0.52,
-          evidence: 'balanced color and contrast without a dominant architectural cue',
-        },
-      ]
-}
 
 const buildEditPlan = (request: ImagingRequest, stats: ImageStats): PhotoEditPlan => {
   const preset = request.stylePreset
-  const brightnessLift = stats.brightness < 0.48 ? 0.13 : stats.brightness > 0.68 ? -0.04 : 0.05
+  const brightnessLift = stats.brightness < 0.48 ? 0.14 : stats.brightness > 0.7 ? -0.04 : 0.06
 
   return {
     preset,
     exposure: clamp(1 + brightnessLift, 0.88, 1.18),
-    contrast: preset === 'Luxury Editorial' ? 1.18 : 1.1,
-    saturation: preset === 'Bright Rental' ? 1.13 : 1.08,
-    warmth: preset === 'Luxury Editorial' ? 1.04 : 0.99,
-    clarity: preset === 'Luxury Editorial' ? 1.2 : 1.12,
-    verticalCorrection: 0.08,
+    contrast: preset === 'Luxury Editorial' ? 1.16 : 1.09,
+    saturation: preset === 'Bright Rental' ? 1.12 : 1.06,
+    warmth: preset === 'Luxury Editorial' ? 1.03 : 0.99,
+    clarity: preset === 'Luxury Editorial' ? 1.18 : 1.1,
+    verticalCorrection: 0.1,
     retouchInstructions: [
-      'balance mixed lighting while preserving true wall color',
-      'lift shadow detail around corners and floor transitions',
-      'keep vertical lines upright for listing-platform credibility',
+      'merge HDR brackets to protect windows and lift interior shadows',
+      'correct wide-angle color and keep walls neutral',
+      'preserve structural truth; enhance only exposure, color, clarity, and perspective',
       request.listingGoal.trim() || DEFAULT_REQUEST.listingGoal,
     ],
   }
 }
 
-const buildPhotoBriefs = (request: ImagingRequest): PhotoBrief[] => [
-  {
-    label: 'Hero Wide',
-    yawDegrees: 0,
-    purpose: `${request.roomType} overview with the widest, cleanest sightline`,
-  },
-  {
-    label: 'Natural Light Angle',
-    yawDegrees: -35,
-    purpose: 'show window-side brightness and depth cues without overexposure',
-  },
-  {
-    label: 'Architectural Depth',
-    yawDegrees: 35,
-    purpose: 'emphasize room scale, corners, finish detail, and floor continuity',
-  },
-]
+const buildRecommendations = (stats: ImageStats, completedShots: number): string[] => {
+  const recommendations = [
+    `${completedShots} guided HDR positions captured for listing coverage`,
+    'deliver landscape 16:9 frames suitable for MLS and rental platforms',
+  ]
+
+  if (stats.brightness < 0.4) {
+    recommendations.push('turn on lights or open blinds before retaking dim angles')
+  } else if (stats.brightness > 0.7) {
+    recommendations.push('watch window glare; the HDR merge is protecting highlights')
+  } else {
+    recommendations.push('lighting is balanced enough for professional color correction')
+  }
+
+  if (stats.edgeDensity < 0.04) {
+    recommendations.push('add one more angle with visible trim, cabinets, furniture, or window edges for depth')
+  }
+
+  return recommendations
+}
+
+const buildPhotoBriefs = (shotPlan: ShotPosition[], frames: CapturedFrame[]): PhotoBrief[] =>
+  shotPlan
+    .filter((shot) => frames.filter((frame) => frame.shotId === shot.id).length >= 3)
+    .map((shot) => ({
+      shotId: shot.id,
+      label: shot.label,
+      purpose: shot.composition,
+    }))
 
 export const analyzeLiveCameraFrame = (
   video: HTMLVideoElement,
-  capturedCount: number,
-  rotationDegrees: number,
+  currentShot: ShotPosition,
+  capturedBrackets: number,
 ): CaptureGuidance | null => {
   if (!video.videoWidth || !video.videoHeight) {
     return null
   }
 
   const canvas = document.createElement('canvas')
-  canvas.width = 96
-  canvas.height = 128
+  canvas.width = 128
+  canvas.height = 72
   const ctx = canvas.getContext('2d')
   if (!ctx) {
     return null
@@ -316,65 +269,65 @@ export const analyzeLiveCameraFrame = (
   ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
   const stats = analyzeCanvas(canvas)
   const brightnessLabel = stats.brightness < 0.38 ? 'dim' : stats.brightness > 0.72 ? 'very bright' : 'balanced'
-  const coverageNeeded = capturedCount < 6
   const qualityScore = Math.round(
-    clamp((1 - Math.abs(stats.brightness - 0.56)) * 58 + stats.contrast * 80 + stats.edgeDensity * 120, 0, 100),
+    clamp((1 - Math.abs(stats.brightness - 0.56)) * 54 + stats.contrast * 88 + stats.edgeDensity * 130, 0, 100),
   )
 
   if (stats.brightness < 0.34) {
     return {
-      headline: 'Aim toward a brighter wall',
-      detail: 'The backend prompt model sees low light. Turn on room lights or face the window before the next capture.',
+      headline: 'This angle is underexposed',
+      detail: 'Turn on lights, open blinds, or face a brighter wall before capturing the HDR burst.',
       tone: 'warning',
       qualityScore,
       brightnessLabel,
-      nextShot: 'Capture after exposure settles.',
+      nextShot: currentShot.placement,
     }
   }
 
   if (stats.brightness > 0.78) {
     return {
-      headline: 'Avoid direct glare',
-      detail: 'The live frame is close to clipping. Angle slightly away from the window to preserve exterior and wall detail.',
+      headline: 'Reduce window glare',
+      detail: 'Shift a few steps sideways or tilt away from the window. The HDR merge can help, but clipped windows still lose detail.',
       tone: 'action',
       qualityScore,
       brightnessLabel,
-      nextShot: 'Shift 10-15 degrees, then capture.',
+      nextShot: currentShot.coaching,
     }
   }
 
-  if (coverageNeeded) {
+  if (capturedBrackets < 3) {
     return {
-      headline: 'Keep rotating for full room coverage',
-      detail: `Captured ${capturedCount} viewpoints. The mapping backend needs at least 6, with even spacing around the room.`,
+      headline: `Ready for ${currentShot.label}`,
+      detail: `${currentShot.composition} Capture a steady HDR burst from this position.`,
       tone: 'action',
       qualityScore,
       brightnessLabel,
-      nextShot: `Next target around ${Math.min(360, Math.round(rotationDegrees + 45))} degrees.`,
+      nextShot: currentShot.coaching,
     }
   }
 
   return {
-    headline: 'Good frame for photoreal output',
-    detail: 'Lighting and texture are strong enough for depth cues, color matching, and listing-photo enhancement.',
+    headline: 'HDR position captured',
+    detail: 'This angle has a full bracket set. Move to the next guided position for stronger listing coverage.',
     tone: 'good',
     qualityScore,
     brightnessLabel,
-    nextShot: capturedCount >= 8 ? 'Finish rotation when you return to the start point.' : 'Capture another evenly spaced angle.',
+    nextShot: 'Continue to the next recommended position.',
   }
 }
 
-export const mapSpaceWithAiBackend = async (
+export const reviewPhotoSession = async (
   frames: CapturedFrame[],
-  model: RoomModel,
+  shotPlan: ShotPosition[],
   request: ImagingRequest = DEFAULT_REQUEST,
-): Promise<AiPipelineResult> => {
-  await new Promise((resolve) => window.setTimeout(resolve, 180))
+): Promise<AiPhotoSessionResult> => {
+  await new Promise((resolve) => window.setTimeout(resolve, 160))
 
+  const neutralFrames = frames.filter((frame) => frame.exposureBias === 0)
   const stats = await Promise.all(
-    frames.map(async (frame) => {
+    neutralFrames.map(async (frame) => {
       const image = await loadImage(frame.imageDataUrl)
-      const scale = 240 / Math.max(image.width, image.height)
+      const scale = 260 / Math.max(image.width, image.height)
       const canvas = drawToCanvas(
         image,
         Math.max(1, Math.round(image.width * scale)),
@@ -384,25 +337,19 @@ export const mapSpaceWithAiBackend = async (
     }),
   )
   const combinedStats = averageStats(stats)
-  const lighting = combinedStats.brightness < 0.4 ? 'dim' : combinedStats.brightness > 0.66 ? 'bright' : 'balanced'
-  const score = coverageScore(frames)
-  const captureNotes = [
-    `${frames.length} smartphone frames registered around the room`,
-    `${score}% angular coverage for model synthesis`,
-    `${lighting} ambient lighting with ${combinedStats.edgeDensity > 0.08 ? 'strong' : 'moderate'} texture cues`,
-  ]
+  const completedShots = summarizeShotStatuses(shotPlan, frames).filter((shot) => shot.complete).length
+  const insight: SessionInsight = {
+    coverageScore: Math.round(clamp((completedShots / Math.max(1, shotPlan.length)) * 100, 0, 100)),
+    lighting: combinedStats.brightness < 0.4 ? 'dim' : combinedStats.brightness > 0.66 ? 'bright' : 'balanced',
+    dominantPalette: combinedStats.palette,
+    recommendations: buildRecommendations(combinedStats, completedShots),
+  }
 
   return {
-    spaceMap: {
-      estimatedDimensions: estimateDimensions(model),
-      coverageScore: score,
-      lighting,
-      dominantPalette: combinedStats.palette,
-      features: detectFeatures(combinedStats),
-      captureNotes,
-    },
+    insight,
     editPlan: buildEditPlan(request, combinedStats),
-    marketingPrompt: `${request.stylePreset} ${request.roomType} listing: ${request.listingGoal.trim() || DEFAULT_REQUEST.listingGoal}`,
-    photoBriefs: buildPhotoBriefs(request),
+    marketingPrompt: `${request.stylePreset} ${request.roomType} photo set: ${request.listingGoal.trim() || DEFAULT_REQUEST.listingGoal}`,
+    photoBriefs: buildPhotoBriefs(shotPlan, frames),
+    completedShots,
   }
 }

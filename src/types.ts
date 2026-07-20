@@ -1,5 +1,8 @@
 export type CapturedFrame = {
   id: string
+  shotId: string
+  shotLabel: string
+  exposureBias: -1 | 0 | 1
   heading: number
   imageDataUrl: string
   width: number
@@ -7,20 +10,19 @@ export type CapturedFrame = {
   capturedAt: number
 }
 
-export type Point3D = {
-  x: number
-  y: number
-  z: number
-  r: number
-  g: number
-  b: number
+export type ShotPosition = {
+  id: string
+  label: string
+  targetHeading: number
+  placement: string
+  composition: string
+  coaching: string
+  priority: 'required' | 'recommended'
 }
 
-export type RoomModel = {
-  points: Point3D[]
-  sourceFrameData: CapturedFrame[]
-  sourceFrames: number
-  generatedAt: number
+export type ShotStatus = ShotPosition & {
+  capturedBrackets: number
+  complete: boolean
 }
 
 export type CaptureGuidance = {
@@ -38,24 +40,11 @@ export type ImagingRequest = {
   stylePreset: 'MLS Clean' | 'Luxury Editorial' | 'Bright Rental'
 }
 
-export type SpaceFeature = {
-  label: string
-  confidence: number
-  evidence: string
-}
-
-export type SpaceMap = {
-  estimatedDimensions: {
-    widthMeters: number
-    depthMeters: number
-    heightMeters: number
-    confidence: number
-  }
+export type SessionInsight = {
   coverageScore: number
   lighting: 'dim' | 'balanced' | 'bright'
   dominantPalette: string[]
-  features: SpaceFeature[]
-  captureNotes: string[]
+  recommendations: string[]
 }
 
 export type PhotoEditPlan = {
@@ -70,24 +59,27 @@ export type PhotoEditPlan = {
 }
 
 export type PhotoBrief = {
+  shotId: string
   label: string
-  yawDegrees: number
   purpose: string
 }
 
-export type AiPipelineResult = {
-  spaceMap: SpaceMap
+export type AiPhotoSessionResult = {
+  insight: SessionInsight
   editPlan: PhotoEditPlan
   marketingPrompt: string
   photoBriefs: PhotoBrief[]
+  completedShots: number
 }
 
 export type StyledPhoto = {
   id: string
+  shotId: string
   angleLabel: string
   dataUrl: string
   width: number
   height: number
   editSummary: string
   qualityScore: number
+  bracketCount: number
 }

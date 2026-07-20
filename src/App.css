@@ -15,7 +15,8 @@
 }
 
 h1,
-h2 {
+h2,
+h3 {
   margin: 0 0 0.6rem;
 }
 
@@ -71,9 +72,29 @@ textarea {
 
 video {
   width: 100%;
-  aspect-ratio: 9 / 16;
+  aspect-ratio: 16 / 9;
   object-fit: cover;
   display: block;
+}
+
+.shot-card {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0.9rem 0;
+  padding: 0.9rem;
+  border: 1px solid #bae6fd;
+  border-radius: 12px;
+  background: #f0f9ff;
+}
+
+.shot-card h3 {
+  color: #0f172a;
+}
+
+.shot-card ul {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: #334155;
 }
 
 .guidance-card {
@@ -87,7 +108,7 @@ video {
 }
 
 .guidance-card strong,
-.ai-report strong {
+.session-report strong {
   display: block;
   margin: 0.2rem 0;
   color: #0f172a;
@@ -153,6 +174,39 @@ video {
   color: #334155;
 }
 
+.shot-list {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0.8rem 0;
+}
+
+.shot-list-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.7rem;
+  width: 100%;
+  border: 1px solid #dbe3ee;
+  background: #f8fafc;
+  color: #0f172a;
+  text-align: left;
+}
+
+.shot-list-item.active {
+  border-color: #2563eb;
+  background: #eff6ff;
+}
+
+.shot-list-item.complete {
+  border-color: #86efac;
+  background: #f0fdf4;
+}
+
+.shot-list-item small {
+  color: #475569;
+  font-weight: 700;
+}
+
 .button-row {
   display: flex;
   flex-wrap: wrap;
@@ -195,15 +249,7 @@ button.secondary {
   text-align: center;
 }
 
-.model-preview {
-  width: 100%;
-  border-radius: 12px;
-  margin: 0.8rem 0 1rem;
-  background: #0f172a;
-  display: block;
-}
-
-.ai-report {
+.session-report {
   display: grid;
   gap: 0.7rem;
   margin-bottom: 1rem;
@@ -213,7 +259,7 @@ button.secondary {
   background: #eef2ff;
 }
 
-.ai-report ul {
+.session-report ul {
   margin: 0;
   padding-left: 1.1rem;
   color: #334155;

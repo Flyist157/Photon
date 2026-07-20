@@ -1,123 +1,85 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
-import { analyzeLiveCameraFrame, mapSpaceWithAiBackend } from './lib/aiBackend'
-import { buildRoomModel } from './lib/reconstruction'
-import { generateListingPhotos, renderInteractivePreview } from './lib/render'
-import type { AiPipelineResult, CaptureGuidance, CapturedFrame, ImagingRequest, RoomModel, StyledPhoto } from './types'
+import {
+  analyzeLiveCameraFrame,
+  buildGuidedShotPlan,
+  reviewPhotoSession,
+  summarizeShotStatuses,
+} from './lib/aiBackend'
+import { generateHdrListingPhotos } from './lib/render'
+import type {
+  AiPhotoSessionResult,
+  CaptureGuidance,
+  CapturedFrame,
+  ImagingRequest,
+  ShotPosition,
+  StyledPhoto,
+} from './types'
 
-const CAPTURE_STEP_DEGREES = 45
-const TARGET_CAPTURES = 8
-const MINIMUM_CAPTURES = 6
 const ROOM_TYPES = ['Living room', 'Bedroom', 'Kitchen', 'Bathroom', 'Office', 'Retail space', 'Interior room']
 const STYLE_PRESETS: ImagingRequest['stylePreset'][] = ['MLS Clean', 'Luxury Editorial', 'Bright Rental']
+const REQUIRED_SHOTS = 3
+const HDR_BIASES: CapturedFrame['exposureBias'][] = [-1, 0, 1]
 
-type ScanState = 'idle' | 'scanning' | 'complete'
 type AppStage = 'capture' | 'processing' | 'gallery'
 
-type DeviceOrientationEventWithCompass = DeviceOrientationEvent & {
-  webkitCompassHeading?: number
+const exposureLabel = (bias: CapturedFrame['exposureBias']): string => {
+  if (bias < 0) {
+    return 'highlight-safe'
+  }
+  if (bias > 0) {
+    return 'shadow-lift'
+  }
+  return 'neutral'
 }
 
-type DeviceOrientationPermissionEvent = typeof DeviceOrientationEvent & {
-  requestPermission?: () => Promise<'granted' | 'denied'>
+const applyExposureBias = (
+  imageData: ImageData,
+  bias: CapturedFrame['exposureBias'],
+): ImageData => {
+  const factor = bias === -1 ? 0.68 : bias === 1 ? 1.38 : 1
+  const output = new Uint8ClampedArray(imageData.data)
+
+  for (let i = 0; i < output.length; i += 4) {
+    output[i] = Math.min(255, Math.round(output[i] * factor))
+    output[i + 1] = Math.min(255, Math.round(output[i + 1] * factor))
+    output[i + 2] = Math.min(255, Math.round(output[i + 2] * factor))
+  }
+
+  return new ImageData(output, imageData.width, imageData.height)
 }
 
-const normalizeHeading = (heading: number): number => {
-  const normalized = heading % 360
-  return normalized < 0 ? normalized + 360 : normalized
-}
-
-const headingDelta = (start: number, current: number): number =>
-  normalizeHeading(current - start)
-
-const circularDistance = (a: number, b: number): number => {
-  const distance = Math.abs(normalizeHeading(a) - normalizeHeading(b))
-  return Math.min(distance, 360 - distance)
-}
+const wait = (ms: number): Promise<void> => new Promise((resolve) => window.setTimeout(resolve, ms))
 
 function App() {
   const videoRef = useRef<HTMLVideoElement | null>(null)
-  const previewCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
-  const scanStartRef = useRef<number | null>(null)
-  const nextAutoCaptureTargetRef = useRef<number>(CAPTURE_STEP_DEGREES)
   const framesRef = useRef<CapturedFrame[]>([])
 
   const [stage, setStage] = useState<AppStage>('capture')
-  const [scanState, setScanState] = useState<ScanState>('idle')
   const [cameraReady, setCameraReady] = useState(false)
-  const [heading, setHeading] = useState<number | null>(null)
-  const [scanStartHeading, setScanStartHeading] = useState<number | null>(null)
+  const [sessionStarted, setSessionStarted] = useState(false)
+  const [activeShotIndex, setActiveShotIndex] = useState(0)
   const [frames, setFrames] = useState<CapturedFrame[]>([])
-  const [roomModel, setRoomModel] = useState<RoomModel | null>(null)
   const [photos, setPhotos] = useState<StyledPhoto[]>([])
-  const [aiResult, setAiResult] = useState<AiPipelineResult | null>(null)
+  const [sessionResult, setSessionResult] = useState<AiPhotoSessionResult | null>(null)
   const [liveGuidance, setLiveGuidance] = useState<CaptureGuidance | null>(null)
+  const [capturing, setCapturing] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const [imagingRequest, setImagingRequest] = useState<ImagingRequest>({
     roomType: 'Living room',
-    listingGoal: 'Create bright, photorealistic listing photos that make the room feel spacious, clean, and true to life.',
+    listingGoal: 'Create bright, accurate, professional listing photos that make the room feel spacious, clean, and true to life.',
     stylePreset: 'MLS Clean',
   })
-  const [sensorEnabled, setSensorEnabled] = useState(false)
-  const [error, setError] = useState<string | null>(null)
 
-  const sensorPermissionRequired =
-    typeof DeviceOrientationEvent !== 'undefined' &&
-    'requestPermission' in (DeviceOrientationEvent as DeviceOrientationPermissionEvent)
-  const showSensorPermissionAction = sensorPermissionRequired && !sensorEnabled
-
-  const captureFrame = useCallback(
-    (forcedRelativeHeading?: number) => {
-      const video = videoRef.current
-      if (!video) {
-        setError('Camera preview is not available yet.')
-        return
-      }
-
-      const width = video.videoWidth
-      const height = video.videoHeight
-      if (!width || !height) {
-        setError('Wait until the camera stream fully initializes before capturing.')
-        return
-      }
-
-      const relativeHeading =
-        forcedRelativeHeading ??
-        (scanStartRef.current !== null && heading !== null
-          ? headingDelta(scanStartRef.current, heading)
-          : Math.min(framesRef.current.length * CAPTURE_STEP_DEGREES, 359))
-
-      const previous = framesRef.current.at(-1)
-      if (previous && circularDistance(previous.heading, relativeHeading) < 14) {
-        return
-      }
-
-      const canvas = document.createElement('canvas')
-      canvas.width = width
-      canvas.height = height
-      const context = canvas.getContext('2d')
-      if (!context) {
-        setError('Unable to access image capture context.')
-        return
-      }
-
-      context.drawImage(video, 0, 0, width, height)
-      const imageDataUrl = canvas.toDataURL('image/jpeg', 0.97)
-      const frame: CapturedFrame = {
-        id: crypto.randomUUID(),
-        heading: normalizeHeading(relativeHeading),
-        imageDataUrl,
-        width,
-        height,
-        capturedAt: Date.now(),
-      }
-
-      framesRef.current = [...framesRef.current, frame]
-      setFrames(framesRef.current)
-      setError(null)
-    },
-    [heading],
-  )
+  const shotPlan = useMemo(() => buildGuidedShotPlan(imagingRequest), [imagingRequest])
+  const activeShot = shotPlan[activeShotIndex] ?? shotPlan[0]
+  const shotStatuses = useMemo(() => summarizeShotStatuses(shotPlan, frames), [frames, shotPlan])
+  const completedShots = shotStatuses.filter((shot) => shot.complete).length
+  const completedRequiredShots = shotStatuses.filter((shot) => shot.priority === 'required' && shot.complete).length
+  const activeShotStatus = shotStatuses[activeShotIndex] ?? shotStatuses[0]
+  const progressPercent = Math.round((completedShots / shotPlan.length) * 100)
+  const canGenerate = completedRequiredShots >= REQUIRED_SHOTS
 
   useEffect(() => {
     let mounted = true
@@ -134,6 +96,7 @@ function App() {
             facingMode: { ideal: 'environment' },
             width: { ideal: 3840 },
             height: { ideal: 2160 },
+            aspectRatio: { ideal: 16 / 9 },
           },
           audio: false,
         })
@@ -151,9 +114,6 @@ function App() {
         }
 
         setCameraReady(true)
-        if (!sensorPermissionRequired) {
-          setSensorEnabled(true)
-        }
       } catch {
         setError('Camera access failed. Allow camera permission and reload Photon.')
       }
@@ -166,59 +126,10 @@ function App() {
       stream?.getTracks().forEach((track) => track.stop())
       streamRef.current = null
     }
-  }, [sensorPermissionRequired])
+  }, [])
 
   useEffect(() => {
-    if (!sensorEnabled) {
-      return
-    }
-
-    const onOrientation = (event: DeviceOrientationEventWithCompass): void => {
-      let measuredHeading: number | null = null
-      if (typeof event.webkitCompassHeading === 'number' && !Number.isNaN(event.webkitCompassHeading)) {
-        measuredHeading = normalizeHeading(event.webkitCompassHeading)
-      } else if (typeof event.alpha === 'number' && !Number.isNaN(event.alpha)) {
-        measuredHeading = normalizeHeading(event.alpha)
-      }
-
-      if (measuredHeading === null) {
-        return
-      }
-
-      setHeading(measuredHeading)
-      if (scanState !== 'scanning' || scanStartRef.current === null) {
-        return
-      }
-
-      const relative = headingDelta(scanStartRef.current, measuredHeading)
-      if (relative + 1.5 >= nextAutoCaptureTargetRef.current && nextAutoCaptureTargetRef.current <= 360) {
-        captureFrame(nextAutoCaptureTargetRef.current)
-        nextAutoCaptureTargetRef.current += CAPTURE_STEP_DEGREES
-      }
-
-      if (relative >= 355 && framesRef.current.length >= TARGET_CAPTURES) {
-        setScanState('complete')
-      }
-    }
-
-    window.addEventListener('deviceorientation', onOrientation, true)
-    return () => {
-      window.removeEventListener('deviceorientation', onOrientation, true)
-    }
-  }, [captureFrame, scanState, sensorEnabled])
-
-  const rotationDegrees = useMemo(() => {
-    if (scanState === 'scanning' && scanStartHeading !== null && heading !== null) {
-      return headingDelta(scanStartHeading, heading)
-    }
-
-    return Math.min((frames.length / TARGET_CAPTURES) * 360, 360)
-  }, [frames.length, heading, scanStartHeading, scanState])
-
-  const progressPercent = Math.round((Math.min(360, rotationDegrees) / 360) * 100)
-
-  useEffect(() => {
-    if (stage !== 'capture' || !cameraReady) {
+    if (stage !== 'capture' || !cameraReady || !activeShot) {
       return
     }
 
@@ -228,7 +139,7 @@ function App() {
         return
       }
 
-      const guidance = analyzeLiveCameraFrame(video, framesRef.current.length, rotationDegrees)
+      const guidance = analyzeLiveCameraFrame(video, activeShot, activeShotStatus?.capturedBrackets ?? 0)
       if (guidance) {
         setLiveGuidance(guidance)
       }
@@ -237,47 +148,45 @@ function App() {
     updateGuidance()
     const intervalId = window.setInterval(updateGuidance, 1200)
     return () => window.clearInterval(intervalId)
-  }, [cameraReady, frames.length, rotationDegrees, stage])
+  }, [activeShot, activeShotStatus?.capturedBrackets, cameraReady, stage])
 
-  useEffect(() => {
-    if (stage !== 'gallery' || !roomModel || !previewCanvasRef.current) {
-      return
-    }
-
-    const canvas = previewCanvasRef.current
-    let frameHandle = 0
-    let yaw = 0
-
-    const draw = (): void => {
-      yaw += 0.35
-      renderInteractivePreview(canvas, roomModel, yaw)
-      frameHandle = window.requestAnimationFrame(draw)
-    }
-
-    draw()
-    return () => window.cancelAnimationFrame(frameHandle)
-  }, [roomModel, stage])
-
-  const requestOrientationPermission = async (): Promise<void> => {
-    const orientationConstructor = DeviceOrientationEvent as DeviceOrientationPermissionEvent
-    if (!orientationConstructor.requestPermission) {
-      setSensorEnabled(true)
-      return
-    }
-
-    try {
-      const result = await orientationConstructor.requestPermission()
-      if (result === 'granted') {
-        setSensorEnabled(true)
-      } else {
-        setError('Motion permission denied. Photon will run in manual capture mode.')
+  const captureBracket = useCallback(
+    (shot: ShotPosition, bias: CapturedFrame['exposureBias']): CapturedFrame | null => {
+      const video = videoRef.current
+      if (!video?.videoWidth || !video.videoHeight) {
+        setError('Wait until the camera stream fully initializes before capturing.')
+        return null
       }
-    } catch {
-      setError('Motion permission request failed. Continue with manual capture mode.')
-    }
-  }
 
-  const startScan = (): void => {
+      const canvas = document.createElement('canvas')
+      canvas.width = video.videoWidth
+      canvas.height = video.videoHeight
+      const context = canvas.getContext('2d')
+      if (!context) {
+        setError('Unable to access image capture context.')
+        return null
+      }
+
+      context.drawImage(video, 0, 0, canvas.width, canvas.height)
+      const biasedFrame = applyExposureBias(context.getImageData(0, 0, canvas.width, canvas.height), bias)
+      context.putImageData(biasedFrame, 0, 0)
+
+      return {
+        id: crypto.randomUUID(),
+        shotId: shot.id,
+        shotLabel: shot.label,
+        exposureBias: bias,
+        heading: shot.targetHeading,
+        imageDataUrl: canvas.toDataURL('image/jpeg', 0.97),
+        width: canvas.width,
+        height: canvas.height,
+        capturedAt: Date.now(),
+      }
+    },
+    [],
+  )
+
+  const startSession = (): void => {
     if (!cameraReady) {
       setError('Camera is still warming up.')
       return
@@ -286,48 +195,75 @@ function App() {
     framesRef.current = []
     setFrames([])
     setPhotos([])
-    setRoomModel(null)
-    setAiResult(null)
+    setSessionResult(null)
     setError(null)
     setStage('capture')
-    setScanState('scanning')
-
-    const start = heading ?? 0
-    scanStartRef.current = start
-    setScanStartHeading(start)
-    nextAutoCaptureTargetRef.current = CAPTURE_STEP_DEGREES
-    captureFrame(0)
+    setSessionStarted(true)
+    setActiveShotIndex(0)
   }
 
-  const finishScan = (): void => {
-    if (framesRef.current.length < MINIMUM_CAPTURES) {
-      setError(`Capture at least ${MINIMUM_CAPTURES} viewpoints before processing.`)
+  const captureHdrBurst = async (): Promise<void> => {
+    if (!sessionStarted) {
+      startSession()
+    }
+    if (!activeShot) {
       return
     }
-    setScanState('complete')
+
+    setCapturing(true)
+    setError(null)
+
+    const keptFrames = framesRef.current.filter((frame) => frame.shotId !== activeShot.id)
+    const capturedFrames: CapturedFrame[] = []
+    for (const bias of HDR_BIASES) {
+      const frame = captureBracket(activeShot, bias)
+      if (frame) {
+        capturedFrames.push(frame)
+      }
+      await wait(90)
+    }
+
+    if (capturedFrames.length === HDR_BIASES.length) {
+      const nextFrames = [...keptFrames, ...capturedFrames]
+      framesRef.current = nextFrames
+      setFrames(nextFrames)
+      const nextIndex = shotPlan.findIndex(
+        (shot, index) => index > activeShotIndex && !nextFrames.some((frame) => frame.shotId === shot.id),
+      )
+      if (nextIndex >= 0) {
+        setActiveShotIndex(nextIndex)
+      }
+    }
+
+    setCapturing(false)
   }
 
-  const processScan = async (): Promise<void> => {
-    if (frames.length < MINIMUM_CAPTURES) {
-      setError(`Capture at least ${MINIMUM_CAPTURES} images before generating the 3D model.`)
+  const clearCurrentShot = (): void => {
+    if (!activeShot) {
+      return
+    }
+
+    const nextFrames = framesRef.current.filter((frame) => frame.shotId !== activeShot.id)
+    framesRef.current = nextFrames
+    setFrames(nextFrames)
+  }
+
+  const processPhotos = async (): Promise<void> => {
+    if (!canGenerate) {
+      setError(`Capture the ${REQUIRED_SHOTS} required HDR positions before generating photos.`)
       return
     }
 
     try {
       setStage('processing')
       setError(null)
-      const model = await buildRoomModel(frames)
-      const aiPipelineResult = await mapSpaceWithAiBackend(frames, model, imagingRequest)
-      const listingPhotos = await generateListingPhotos(model, aiPipelineResult.editPlan, aiPipelineResult.photoBriefs)
-      setRoomModel(model)
-      setAiResult(aiPipelineResult)
-      setPhotos(listingPhotos)
+      const result = await reviewPhotoSession(frames, shotPlan, imagingRequest)
+      const enhancedPhotos = await generateHdrListingPhotos(frames, result.editPlan, result.photoBriefs)
+      setSessionResult(result)
+      setPhotos(enhancedPhotos)
       setStage('gallery')
-    } catch (scanError) {
-      const message =
-        scanError instanceof Error
-          ? scanError.message
-          : 'Photon could not reconstruct a model from this scan.'
+    } catch (photoError) {
+      const message = photoError instanceof Error ? photoError.message : 'Photon could not render HDR listing photos.'
       setError(message)
       setStage('capture')
     }
@@ -345,9 +281,8 @@ function App() {
       <header className="card">
         <h1>Photon</h1>
         <p>
-          Stand in the center of the room, hold your phone upright, and rotate in one slow 360° turn.
-          Photon captures high-res room views, uses live prompts to guide coverage, maps the space with an
-          AI-style backend pass, then edits photorealistic listing images from the reconstructed model.
+          Guided real-estate capture for phones. Photon coaches you to the best room positions, captures
+          wide-angle HDR brackets, and turns them into polished listing-ready photos.
         </p>
       </header>
 
@@ -355,9 +290,10 @@ function App() {
 
       {stage === 'capture' && (
         <section className="card">
-          <h2>1) Guided Room Scan</h2>
+          <h2>1) Guided HDR photo positions</h2>
           <p className="hint">
-            Keep motion smooth. Photon captures frames automatically every 45° when sensor data is available.
+            Hold the phone landscape at chest height. Capture the three required positions first, then add
+            recommended angles for a stronger listing set.
           </p>
 
           <div className="prompt-panel">
@@ -377,7 +313,7 @@ function App() {
               </select>
             </label>
             <label>
-              Real-time editing prompt
+              Editing goal
               <textarea
                 value={imagingRequest.listingGoal}
                 onChange={(event) =>
@@ -387,7 +323,7 @@ function App() {
               />
             </label>
             <label>
-              AI editing preset
+              Photo style
               <select
                 value={imagingRequest.stylePreset}
                 onChange={(event) =>
@@ -406,20 +342,29 @@ function App() {
             </label>
           </div>
 
-          {showSensorPermissionAction && (
-            <button className="secondary" onClick={() => void requestOrientationPermission()}>
-              Enable motion guidance
-            </button>
-          )}
-
           <div className="preview-wrap">
             <video ref={videoRef} playsInline autoPlay muted />
           </div>
 
+          {activeShot && (
+            <article className="shot-card">
+              <div>
+                <span className="eyebrow">Current position</span>
+                <h3>{activeShot.label}</h3>
+                <p>{activeShot.placement}</p>
+              </div>
+              <ul>
+                <li>{activeShot.composition}</li>
+                <li>{activeShot.coaching}</li>
+                <li>HDR burst: {HDR_BIASES.map(exposureLabel).join(' + ')}</li>
+              </ul>
+            </article>
+          )}
+
           {liveGuidance && (
             <div className={`guidance-card ${liveGuidance.tone}`}>
               <div>
-                <span className="eyebrow">Live capture prompt</span>
+                <span className="eyebrow">Live photo coach</span>
                 <strong>{liveGuidance.headline}</strong>
                 <p>{liveGuidance.detail}</p>
               </div>
@@ -431,33 +376,60 @@ function App() {
             </div>
           )}
 
-          <div className="progress-track" aria-label="Rotation progress">
+          <div className="progress-track" aria-label="Shot coverage progress">
             <div className="progress-fill" style={{ width: `${progressPercent}%` }} />
           </div>
           <div className="meta-row">
-            <span>Rotation: {Math.round(rotationDegrees)}° / 360°</span>
-            <span>Captured: {frames.length}</span>
+            <span>
+              Required: {completedRequiredShots}/{REQUIRED_SHOTS}
+            </span>
+            <span>
+              Total positions: {completedShots}/{shotPlan.length}
+            </span>
+          </div>
+
+          <div className="shot-list">
+            {shotStatuses.map((shot, index) => (
+              <button
+                className={`shot-list-item ${index === activeShotIndex ? 'active' : ''} ${shot.complete ? 'complete' : ''}`}
+                key={shot.id}
+                onClick={() => setActiveShotIndex(index)}
+              >
+                <span>{shot.label}</span>
+                <small>
+                  {shot.priority} • {shot.capturedBrackets}/3 brackets
+                </small>
+              </button>
+            ))}
           </div>
 
           <div className="button-row">
-            <button onClick={startScan} disabled={!cameraReady || scanState === 'scanning'}>
-              {scanState === 'idle' ? 'Start scan' : 'Restart scan'}
+            <button onClick={startSession} disabled={!cameraReady || capturing}>
+              {sessionStarted ? 'Restart photo session' : 'Start photo session'}
             </button>
-            <button onClick={() => captureFrame()} disabled={scanState !== 'scanning'}>
-              Capture now
-            </button>
-            <button onClick={finishScan} disabled={scanState !== 'scanning'}>
-              Finish rotation
-            </button>
-          </div>
-
-          <div className="button-row">
             <button
-              className="primary"
-              onClick={() => void processScan()}
-              disabled={scanState !== 'complete'}
+              onClick={() => setActiveShotIndex((index) => Math.max(0, index - 1))}
+              disabled={activeShotIndex === 0 || capturing}
             >
-              Build 3D model and generate photos
+              Previous position
+            </button>
+            <button
+              onClick={() => setActiveShotIndex((index) => Math.min(shotPlan.length - 1, index + 1))}
+              disabled={activeShotIndex === shotPlan.length - 1 || capturing}
+            >
+              Next position
+            </button>
+          </div>
+
+          <div className="button-row">
+            <button className="primary" onClick={() => void captureHdrBurst()} disabled={!cameraReady || capturing}>
+              {capturing ? 'Capturing HDR burst...' : 'Capture wide-angle HDR'}
+            </button>
+            <button className="secondary" onClick={clearCurrentShot} disabled={capturing || !activeShotStatus?.capturedBrackets}>
+              Retake current
+            </button>
+            <button className="primary" onClick={() => void processPhotos()} disabled={!canGenerate || capturing}>
+              Generate enhanced listing photos
             </button>
           </div>
         </section>
@@ -465,58 +437,47 @@ function App() {
 
       {stage === 'processing' && (
         <section className="card center">
-          <h2>2) Mapping and editing with Photon AI</h2>
-          <p>Compiling color + depth cues, estimating the room map, generating prompts, and rendering listing photos.</p>
+          <h2>2) Merging HDR brackets</h2>
+          <p>Combining highlight, neutral, and shadow brackets, correcting color, and preparing MLS-ready photos.</p>
         </section>
       )}
 
-      {stage === 'gallery' && roomModel && (
+      {stage === 'gallery' && sessionResult && (
         <section className="card">
-          <h2>3) Final Photo Gallery</h2>
+          <h2>3) Enhanced Listing Photo Gallery</h2>
           <p className="hint">
-            Source frames: {roomModel.sourceFrames} • Point cloud samples: {roomModel.points.length.toLocaleString()}
+            HDR positions: {sessionResult.completedShots} • Coverage score: {sessionResult.insight.coverageScore}% •{' '}
+            Lighting: {sessionResult.insight.lighting}
           </p>
-          <canvas ref={previewCanvasRef} className="model-preview" width={520} height={280} />
 
-          {aiResult && (
-            <div className="ai-report">
-              <div>
-                <span className="eyebrow">Backend room map</span>
-                <strong>
-                  {aiResult.spaceMap.estimatedDimensions.widthMeters}m ×{' '}
-                  {aiResult.spaceMap.estimatedDimensions.depthMeters}m ×{' '}
-                  {aiResult.spaceMap.estimatedDimensions.heightMeters}m
-                </strong>
-                <p>
-                  {aiResult.spaceMap.coverageScore}% coverage • {aiResult.spaceMap.lighting} lighting •{' '}
-                  {Math.round(aiResult.spaceMap.estimatedDimensions.confidence * 100)}% map confidence
-                </p>
-              </div>
-              <div className="palette-row">
-                {aiResult.spaceMap.dominantPalette.map((color) => (
-                  <span key={color} style={{ background: color }} title={color} />
-                ))}
-              </div>
-              <ul>
-                {aiResult.spaceMap.features.map((feature) => (
-                  <li key={feature.label}>
-                    <strong>{feature.label}</strong> ({Math.round(feature.confidence * 100)}%): {feature.evidence}
-                  </li>
-                ))}
-              </ul>
-              <p className="prompt-output">{aiResult.marketingPrompt}</p>
+          <div className="session-report">
+            <div>
+              <span className="eyebrow">Photo session review</span>
+              <strong>{sessionResult.marketingPrompt}</strong>
             </div>
-          )}
+            <div className="palette-row">
+              {sessionResult.insight.dominantPalette.map((color) => (
+                <span key={color} style={{ background: color }} title={color} />
+              ))}
+            </div>
+            <ul>
+              {sessionResult.insight.recommendations.map((recommendation) => (
+                <li key={recommendation}>{recommendation}</li>
+              ))}
+            </ul>
+          </div>
 
           <div className="gallery-grid">
             {photos.map((photo) => (
               <article className="photo-card" key={photo.id}>
-                <img src={photo.dataUrl} alt={`Photon output ${photo.angleLabel}`} />
+                <img src={photo.dataUrl} alt={`Photon HDR output ${photo.angleLabel}`} />
                 <div className="photo-meta">
                   <div>
                     <strong>{photo.angleLabel}</strong>
                     <p>{photo.editSummary}</p>
-                    <span>{photo.qualityScore}% render confidence</span>
+                    <span>
+                      {photo.bracketCount} HDR brackets • {photo.qualityScore}% output confidence
+                    </span>
                   </div>
                   <button onClick={() => downloadImage(photo)}>Download</button>
                 </div>
@@ -525,7 +486,7 @@ function App() {
           </div>
 
           <div className="button-row">
-            <button onClick={startScan}>Scan another room</button>
+            <button onClick={startSession}>Capture another room</button>
           </div>
         </section>
       )}

@@ -1,41 +1,31 @@
 # Photon
 
-Photon is a mobile-first real-estate imaging app that guides a user through a 360° smartphone capture pass, reconstructs a depth-aware color point cloud, maps the room with an AI-style backend pipeline, and generates polished photorealistic listing photos with one-click download.
+Photon is a mobile-first real-estate imaging app that guides a user to the best photo positions in a room, captures wide-angle HDR brackets from each position, and generates polished listing-ready photos with one-click download.
 
 ## What it does
 
-1. **Guides a 360° rotation**
-   - Instructs the user to stand at room center and rotate slowly.
-   - Uses motion sensors when available to track rotation progress and auto-capture every 45°.
-   - Provides manual capture fallback when motion permissions are unavailable.
-   - Samples the live camera stream for real-time prompts about glare, low light, coverage, and next-shot direction.
+1. **Guides optimal photo positions**
+   - Coaches the user through hero corner, window-balanced, opposite-corner, entry-context, and feature-detail angles.
+   - Prioritizes the three required angles first, with optional supporting shots for stronger listing coverage.
+   - Gives live feedback for low light, window glare, composition, and capture readiness.
 
 2. **Accepts real-estate prompting**
-   - Lets the user choose room type, listing-photo style, and a freeform marketing/editing prompt.
-   - Carries that prompt into the mapping and image-editing pass.
+   - Lets the user choose room type, listing-photo style, and a freeform editing goal.
+   - Carries that prompt into the photo review and enhancement pass.
 
-3. **Captures high-resolution frames**
-   - Requests rear camera with high-res constraints (`ideal: 3840x2160`).
-   - Stores JPEG frames at high quality for reconstruction.
+3. **Captures wide-angle HDR brackets**
+   - Requests the rear camera with high-res 16:9 constraints.
+   - Captures highlight-safe, neutral, and shadow-lift brackets at each guided position.
+   - Uses a browser-compatible synthetic bracket merge when direct phone exposure control is unavailable.
 
-4. **Builds a depth-sensitive real-color 3D model**
-   - Converts each frame into a sampled point cloud with per-point RGB values.
-   - Estimates pseudo-depth from luminance, edge energy, and geometric priors.
-   - Aggregates all captured viewpoints into one room-scale model.
+4. **Reviews the photo session**
+   - Scores coverage by completed guided positions.
+   - Summarizes lighting, dominant palette, and practical retake recommendations.
 
-5. **Maps the room with a backend-style AI pipeline**
-   - Estimates room dimensions, coverage score, lighting conditions, dominant palette, and likely space features.
-   - Produces a structured edit plan and marketing prompt from the captured scene and user instructions.
-
-6. **Synthesizes three listing angles**
-   - Selects the nearest real camera frame for each angle as the photoreal base image.
-   - Layers model-aware color/depth context into hero, natural-light, and architectural-depth listing photos.
-
-7. **Post-produces each image**
-   - Applies prompt-aware white balance, exposure/contrast tuning, warmth, color enhancement, and sharpening.
-
-8. **Shows a downloadable gallery**
-   - Displays the animated model preview, room map, edit rationale, and all three downloadable photos.
+5. **Generates listing-ready photos**
+   - Merges HDR brackets.
+   - Applies white balance, exposure/contrast tuning, color correction, warmth, and sharpening.
+   - Exports 16:9 JPGs with one-click download.
 
 ## Run locally
 
@@ -44,12 +34,11 @@ npm install
 npm run dev
 ```
 
-Then open the app in a mobile browser (or device emulator) and grant camera/motion permissions.
+Then open the app in a mobile browser on the same network and grant camera permission.
 
 ## Limitations and best-effort notes
 
-- This implementation performs **on-device heuristic depth reconstruction** rather than full SLAM/photogrammetry.
-- The AI backend is currently a deterministic in-browser inference layer, so the app works without external credentials or network calls. It is structured around typed mapping and edit-plan outputs that can be replaced by a hosted model endpoint.
-- Depth quality depends heavily on lighting, texture richness, and smooth user rotation.
-- Motion sensors vary by browser/device; manual capture mode is provided as fallback.
-- The output is designed to be practical and fast in-browser, but not equivalent to lidar-grade scanning.
+- Photon now focuses on guided capture and professional photo enhancement rather than 3D reconstruction.
+- Browser camera APIs do not reliably expose physical wide-lens selection or manual exposure control across phones, so HDR brackets are simulated from captured frames when needed.
+- Output quality depends on phone camera quality, room lighting, lens cleanliness, and steady landscape capture.
+- The AI backend is currently a deterministic in-browser inference layer, so the app works without external credentials or network calls. It is structured around typed review and edit-plan outputs that can be replaced by a hosted model endpoint.

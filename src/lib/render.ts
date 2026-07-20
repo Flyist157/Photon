@@ -1,112 +1,52 @@
 import { clamp, loadImage } from './image'
-import type { CapturedFrame, PhotoBrief, PhotoEditPlan, RoomModel, StyledPhoto } from '../types'
+import type { CapturedFrame, PhotoBrief, PhotoEditPlan, StyledPhoto } from '../types'
 
-type CameraPose = {
-  yaw: number
-  pitch: number
-  distance: number
-  fovDegrees: number
-}
-
-type RenderOptions = {
-  width: number
-  height: number
-  background: string
-  pointSize: number
-}
+const OUTPUT_WIDTH = 1600
+const OUTPUT_HEIGHT = 900
 
 const DEFAULT_EDIT_PLAN: PhotoEditPlan = {
   preset: 'MLS Clean',
   exposure: 1.06,
-  contrast: 1.1,
-  saturation: 1.08,
-  warmth: 1,
-  clarity: 1.12,
-  verticalCorrection: 0.08,
-  retouchInstructions: ['balance exposure', 'preserve realistic color', 'sharpen architectural detail'],
+  contrast: 1.09,
+  saturation: 1.06,
+  warmth: 0.99,
+  clarity: 1.1,
+  verticalCorrection: 0.1,
+  retouchInstructions: ['merge HDR brackets', 'correct color', 'keep listing photos accurate'],
 }
 
-const toRadians = (degrees: number): number => (degrees * Math.PI) / 180
-
-const createPerspective = (fovDegrees: number, viewportHeight: number): number =>
-  viewportHeight / Math.tan(toRadians(fovDegrees) / 2)
-
-const rotateY = (x: number, z: number, yaw: number): [number, number] => {
-  const cosY = Math.cos(yaw)
-  const sinY = Math.sin(yaw)
-  return [x * cosY - z * sinY, x * sinY + z * cosY]
-}
-
-const rotateX = (y: number, z: number, pitch: number): [number, number] => {
-  const cosP = Math.cos(pitch)
-  const sinP = Math.sin(pitch)
-  return [y * cosP - z * sinP, y * sinP + z * cosP]
-}
-
-const clearBackground = (ctx: CanvasRenderingContext2D, width: number, height: number, color: string): void => {
-  if (color === 'transparent') {
-    ctx.clearRect(0, 0, width, height)
-    return
-  }
-
-  ctx.fillStyle = color
-  ctx.fillRect(0, 0, width, height)
-}
-
-const renderModel = (
+const drawCoverImage = (
   ctx: CanvasRenderingContext2D,
-  model: RoomModel,
-  camera: CameraPose,
-  options: RenderOptions,
+  image: HTMLImageElement,
+  width: number,
+  height: number,
 ): void => {
-  const { width, height, pointSize } = options
-  clearBackground(ctx, width, height, options.background)
-  const focalLength = createPerspective(camera.fovDegrees, height)
+  const scale = Math.max(width / image.width, height / image.height)
+  const drawWidth = image.width * scale
+  const drawHeight = image.height * scale
+  const offsetX = (width - drawWidth) / 2
+  const offsetY = (height - drawHeight) / 2
+  ctx.drawImage(image, offsetX, offsetY, drawWidth, drawHeight)
+}
 
-  const projected = model.points
-    .map((point) => {
-      let x = point.x
-      let y = point.y
-      let z = point.z
-
-      ;[x, z] = rotateY(x, z, -camera.yaw)
-      z += camera.distance
-      ;[y, z] = rotateX(y, z, -camera.pitch)
-
-      if (z <= 0.2) {
-        return null
-      }
-
-      const px = (x * focalLength) / z + width / 2
-      const py = (y * focalLength) / z + height / 2
-      if (px < -2 || py < -2 || px > width + 2 || py > height + 2) {
-        return null
-      }
-
-      return {
-        x: px,
-        y: py,
-        z,
-        color: `rgb(${point.r}, ${point.g}, ${point.b})`,
-      }
-    })
-    .filter((value): value is { x: number; y: number; z: number; color: string } => value !== null)
-    .sort((a, b) => b.z - a.z)
-
-  for (const sample of projected) {
-    const fog = clamp(1 - sample.z / 11, 0.35, 1)
-    ctx.globalAlpha = fog
-    ctx.fillStyle = sample.color
-    ctx.fillRect(sample.x, sample.y, pointSize, pointSize)
+const imageDataFromFrame = async (frame: CapturedFrame, width: number, height: number): Promise<ImageData> => {
+  const image = await loadImage(frame.imageDataUrl)
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const ctx = canvas.getContext('2d')
+  if (!ctx) {
+    throw new Error('Unable to create HDR merge surface.')
   }
-  ctx.globalAlpha = 1
+
+  drawCoverImage(ctx, image, width, height)
+  return ctx.getImageData(0, 0, width, height)
 }
 
 const sharpen = (imageData: ImageData, width: number, height: number, clarity: number): ImageData => {
   const src = imageData.data
   const output = new Uint8ClampedArray(src.length)
   const centerWeight = 4 + clarity
-
   const kernel = [
     [0, -1, 0],
     [-1, centerWeight, -1],
@@ -142,13 +82,47 @@ const sharpen = (imageData: ImageData, width: number, height: number, clarity: n
   return new ImageData(output, width, height)
 }
 
-const applyRealEstateLook = (
-  ctx: CanvasRenderingContext2D,
+const mergeHdrBrackets = (brackets: ImageData[], width: number, height: number): ImageData => {
+  const output = new Uint8ClampedArray(width * height * 4)
+  const dark = brackets[0]?.data
+  const neutral = brackets[1]?.data ?? brackets[0]?.data
+  const bright = brackets[2]?.data ?? neutral
+
+  if (!dark || !neutral || !bright) {
+    throw new Error('Capture at least one bracket before rendering HDR output.')
+  }
+
+  for (let i = 0; i < output.length; i += 4) {
+    const neutralLuma = (neutral[i] + neutral[i + 1] + neutral[i + 2]) / 765
+    const highlightWeight = clamp((neutralLuma - 0.58) * 1.9, 0, 1)
+    const shadowWeight = clamp((0.42 - neutralLuma) * 1.9, 0, 1)
+    const neutralWeight = clamp(1 - highlightWeight - shadowWeight, 0.18, 1)
+    const totalWeight = highlightWeight + shadowWeight + neutralWeight
+
+    for (let channel = 0; channel < 3; channel += 1) {
+      output[i + channel] = clamp(
+        Math.round(
+          (dark[i + channel] * highlightWeight +
+            neutral[i + channel] * neutralWeight +
+            bright[i + channel] * shadowWeight) /
+            totalWeight,
+        ),
+        0,
+        255,
+      )
+    }
+    output[i + 3] = 255
+  }
+
+  return new ImageData(output, width, height)
+}
+
+const applyListingLook = (
+  imageData: ImageData,
   width: number,
   height: number,
-  editPlan: PhotoEditPlan = DEFAULT_EDIT_PLAN,
-): void => {
-  const imageData = ctx.getImageData(0, 0, width, height)
+  editPlan: PhotoEditPlan,
+): ImageData => {
   const buffer = imageData.data
   let avgR = 0
   let avgG = 0
@@ -174,9 +148,9 @@ const applyRealEstateLook = (
     let g = buffer[i + 1] * gainG * editPlan.exposure
     let b = (buffer[i + 2] * gainB * editPlan.exposure) / editPlan.warmth
 
-    r = ((r - 128) * editPlan.contrast + 128) * 1.04
-    g = ((g - 128) * editPlan.contrast + 128) * 1.04
-    b = ((b - 128) * editPlan.contrast + 128) * 1.04
+    r = ((r - 128) * editPlan.contrast + 128) * 1.03
+    g = ((g - 128) * editPlan.contrast + 128) * 1.03
+    b = ((b - 128) * editPlan.contrast + 128) * 1.03
 
     const luma = (r + g + b) / 3
     r = luma + (r - luma) * editPlan.saturation
@@ -188,169 +162,52 @@ const applyRealEstateLook = (
     buffer[i + 2] = clamp(Math.round(b), 0, 255)
   }
 
-  const sharpened = sharpen(imageData, width, height, editPlan.clarity)
-  ctx.putImageData(sharpened, 0, 0)
+  return sharpen(imageData, width, height, editPlan.clarity)
 }
 
-const normalizeDegrees = (degrees: number): number => {
-  const normalized = degrees % 360
-  return normalized < 0 ? normalized + 360 : normalized
-}
-
-const circularDistanceDegrees = (a: number, b: number): number => {
-  const distance = Math.abs(normalizeDegrees(a) - normalizeDegrees(b))
-  return Math.min(distance, 360 - distance)
-}
-
-const findClosestSourceFrame = (frames: CapturedFrame[], yawDegrees: number): CapturedFrame | null => {
-  if (!frames.length) {
-    return null
-  }
-
-  const targetHeading = normalizeDegrees(yawDegrees)
-  return frames.reduce((closest, frame) =>
-    circularDistanceDegrees(frame.heading, targetHeading) < circularDistanceDegrees(closest.heading, targetHeading)
-      ? frame
-      : closest,
-  )
-}
-
-const drawCoverImage = (
-  ctx: CanvasRenderingContext2D,
-  image: HTMLImageElement,
-  width: number,
-  height: number,
-): void => {
-  const scale = Math.max(width / image.width, height / image.height)
-  const drawWidth = image.width * scale
-  const drawHeight = image.height * scale
-  const offsetX = (width - drawWidth) / 2
-  const offsetY = (height - drawHeight) / 2
-  ctx.drawImage(image, offsetX, offsetY, drawWidth, drawHeight)
-}
-
-export const renderInteractivePreview = (
-  canvas: HTMLCanvasElement,
-  model: RoomModel,
-  yawDegrees: number,
-): void => {
-  const ctx = canvas.getContext('2d')
-  if (!ctx) {
-    return
-  }
-
-  renderModel(
-    ctx,
-    model,
-    {
-      yaw: toRadians(yawDegrees),
-      pitch: toRadians(-6),
-      distance: 8.2,
-      fovDegrees: 52,
-    },
-    {
-      width: canvas.width,
-      height: canvas.height,
-      background: '#0f172a',
-      pointSize: 2,
-    },
-  )
-}
-
-const synthesizePhoto = async (
-  model: RoomModel,
-  yawDegrees: number,
-  width: number,
-  height: number,
-  label: string,
-  editPlan: PhotoEditPlan = DEFAULT_EDIT_PLAN,
-  brief?: PhotoBrief,
+const renderPhoto = async (
+  shotFrames: CapturedFrame[],
+  brief: PhotoBrief,
+  editPlan: PhotoEditPlan,
 ): Promise<StyledPhoto> => {
+  const sortedFrames = [...shotFrames].sort((a, b) => a.exposureBias - b.exposureBias)
+  const bracketData = await Promise.all(
+    sortedFrames.slice(0, 3).map((frame) => imageDataFromFrame(frame, OUTPUT_WIDTH, OUTPUT_HEIGHT)),
+  )
+  const merged = mergeHdrBrackets(bracketData, OUTPUT_WIDTH, OUTPUT_HEIGHT)
+  const enhanced = applyListingLook(merged, OUTPUT_WIDTH, OUTPUT_HEIGHT, editPlan)
+
   const canvas = document.createElement('canvas')
-  canvas.width = width
-  canvas.height = height
+  canvas.width = OUTPUT_WIDTH
+  canvas.height = OUTPUT_HEIGHT
   const ctx = canvas.getContext('2d')
   if (!ctx) {
-    throw new Error('Unable to initialize rendering surface for synthesized photo.')
+    throw new Error('Unable to initialize HDR output canvas.')
   }
 
-  const sourceFrame = findClosestSourceFrame(model.sourceFrameData, yawDegrees)
-  if (sourceFrame) {
-    try {
-      const image = await loadImage(sourceFrame.imageDataUrl)
-      drawCoverImage(ctx, image, width, height)
-
-      const overlay = document.createElement('canvas')
-      overlay.width = width
-      overlay.height = height
-      const overlayCtx = overlay.getContext('2d')
-      if (overlayCtx) {
-        renderModel(
-          overlayCtx,
-          model,
-          {
-            yaw: toRadians(yawDegrees),
-            pitch: toRadians(-4 + editPlan.verticalCorrection * 10),
-            distance: 8,
-            fovDegrees: 48,
-          },
-          {
-            width,
-            height,
-            background: 'transparent',
-            pointSize: 2,
-          },
-        )
-        ctx.globalAlpha = 0.22
-        ctx.globalCompositeOperation = 'soft-light'
-        ctx.drawImage(overlay, 0, 0)
-        ctx.globalAlpha = 1
-        ctx.globalCompositeOperation = 'source-over'
-      }
-    } catch {
-      clearBackground(ctx, width, height, '#fafafa')
-    }
-  } else {
-    renderModel(
-      ctx,
-      model,
-      {
-        yaw: toRadians(yawDegrees),
-        pitch: toRadians(-4 + editPlan.verticalCorrection * 10),
-        distance: 8,
-        fovDegrees: 48,
-      },
-      {
-        width,
-        height,
-        background: '#fafafa',
-        pointSize: 2,
-      },
-    )
-  }
-
-  applyRealEstateLook(ctx, width, height, editPlan)
+  ctx.putImageData(enhanced, 0, 0)
 
   return {
-    id: `${label.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`,
-    angleLabel: label,
+    id: `${brief.shotId}-${Date.now()}`,
+    shotId: brief.shotId,
+    angleLabel: brief.label,
     dataUrl: canvas.toDataURL('image/jpeg', 0.96),
-    width,
-    height,
-    editSummary: brief?.purpose ?? editPlan.retouchInstructions.slice(0, 2).join(' • '),
-    qualityScore: Math.round(clamp((model.sourceFrames / 8) * 62 + (model.points.length / 100000) * 38, 35, 99)),
+    width: OUTPUT_WIDTH,
+    height: OUTPUT_HEIGHT,
+    editSummary: `${brief.purpose} HDR merged and corrected with ${editPlan.preset}.`,
+    qualityScore: Math.round(clamp((shotFrames.length / 3) * 72 + editPlan.clarity * 16 + editPlan.contrast * 10, 45, 99)),
+    bracketCount: shotFrames.length,
   }
 }
 
-export const generateListingPhotos = async (
-  model: RoomModel,
+export const generateHdrListingPhotos = async (
+  frames: CapturedFrame[],
   editPlan: PhotoEditPlan = DEFAULT_EDIT_PLAN,
-  photoBriefs: PhotoBrief[] = [
-    { label: 'Left Angle', yawDegrees: -35, purpose: 'balanced side perspective for listing galleries' },
-    { label: 'Center Angle', yawDegrees: 0, purpose: 'primary room overview' },
-    { label: 'Right Angle', yawDegrees: 35, purpose: 'opposite side perspective for room depth' },
-  ],
+  photoBriefs: PhotoBrief[],
 ): Promise<StyledPhoto[]> =>
-  Promise.all(photoBriefs.map((brief) =>
-    synthesizePhoto(model, brief.yawDegrees, 1600, 900, brief.label, editPlan, brief),
-  ))
+  Promise.all(
+    photoBriefs.map((brief) => {
+      const shotFrames = frames.filter((frame) => frame.shotId === brief.shotId)
+      return renderPhoto(shotFrames, brief, editPlan)
+    }),
+  )
