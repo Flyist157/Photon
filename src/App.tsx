@@ -248,6 +248,14 @@ function App() {
     setFrames(nextFrames)
   }
 
+  const goToPreviousShot = (): void => {
+    setActiveShotIndex(Math.max(0, activeShotIndex - 1))
+  }
+
+  const goToNextShot = (): void => {
+    setActiveShotIndex(Math.min(shotPlan.length - 1, activeShotIndex + 1))
+  }
+
   const processPhotos = async (): Promise<void> => {
     if (!canGenerate) {
       setError(`Capture the ${REQUIRED_SHOTS} required HDR positions before generating photos.`)
@@ -408,13 +416,13 @@ function App() {
               {sessionStarted ? 'Restart photo session' : 'Start photo session'}
             </button>
             <button
-              onClick={() => setActiveShotIndex((index) => Math.max(0, index - 1))}
+              onClick={goToPreviousShot}
               disabled={activeShotIndex === 0 || capturing}
             >
               Previous position
             </button>
             <button
-              onClick={() => setActiveShotIndex((index) => Math.min(shotPlan.length - 1, index + 1))}
+              onClick={goToNextShot}
               disabled={activeShotIndex === shotPlan.length - 1 || capturing}
             >
               Next position
