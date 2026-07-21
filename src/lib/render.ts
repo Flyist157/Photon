@@ -436,7 +436,7 @@ const renderPhoto = async (
   }
 
   ctx.putImageData(upscaled, 0, 0)
-  const editSummary = `${brief.purpose} AI recognized ${detectedContent.tags.join(', ')} and applied ${correctionPlan.reasons.slice(1).join(', ')}.`
+  const editSummary = `${brief.purpose} HDR merged and corrected with ${editPlan.preset}.`
 
   return {
     id: `${brief.shotId}-${Date.now()}`,

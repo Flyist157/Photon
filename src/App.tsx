@@ -23,6 +23,12 @@ const HDR_BIASES: CapturedFrame['exposureBias'][] = [-1, 0, 1]
 
 type AppStage = 'capture' | 'processing' | 'gallery'
 
+type BaseCapture = {
+  imageData: ImageData
+  width: number
+  height: number
+}
+
 const exposureLabel = (bias: CapturedFrame['exposureBias']): string => {
   if (bias < 0) {
     return 'highlight-safe'
@@ -150,8 +156,8 @@ function App() {
     return () => window.clearInterval(intervalId)
   }, [activeShot, activeShotStatus?.capturedBrackets, cameraReady, stage])
 
-  const captureBracket = useCallback(
-    (shot: ShotPosition, bias: CapturedFrame['exposureBias']): CapturedFrame | null => {
+  const captureBaseFrame = useCallback(
+    (): BaseCapture | null => {
       const video = videoRef.current
       if (!video?.videoWidth || !video.videoHeight) {
         setError('Wait until the camera stream fully initializes before capturing.')
@@ -168,7 +174,32 @@ function App() {
       }
 
       context.drawImage(video, 0, 0, canvas.width, canvas.height)
-      const biasedFrame = applyExposureBias(context.getImageData(0, 0, canvas.width, canvas.height), bias)
+      return {
+        imageData: context.getImageData(0, 0, canvas.width, canvas.height),
+        width: canvas.width,
+        height: canvas.height,
+      }
+    },
+    [],
+  )
+
+  const createBracketFrame = useCallback(
+    (shot: ShotPosition, baseCapture: BaseCapture, bias: CapturedFrame['exposureBias']): CapturedFrame | null => {
+      const canvas = document.createElement('canvas')
+      canvas.width = baseCapture.width
+      canvas.height = baseCapture.height
+      const context = canvas.getContext('2d')
+      if (!context) {
+        setError('Unable to access image capture context.')
+        return null
+      }
+
+      const baseImageData = new ImageData(
+        new Uint8ClampedArray(baseCapture.imageData.data),
+        baseCapture.width,
+        baseCapture.height,
+      )
+      const biasedFrame = applyExposureBias(baseImageData, bias)
       context.putImageData(biasedFrame, 0, 0)
 
       return {
@@ -178,8 +209,8 @@ function App() {
         exposureBias: bias,
         heading: shot.targetHeading,
         imageDataUrl: canvas.toDataURL('image/jpeg', 0.97),
-        width: canvas.width,
-        height: canvas.height,
+        width: baseCapture.width,
+        height: baseCapture.height,
         capturedAt: Date.now(),
       }
     },
@@ -213,14 +244,20 @@ function App() {
     setCapturing(true)
     setError(null)
 
+    const baseCapture = captureBaseFrame()
+    if (!baseCapture) {
+      setCapturing(false)
+      return
+    }
+
     const keptFrames = framesRef.current.filter((frame) => frame.shotId !== activeShot.id)
     const capturedFrames: CapturedFrame[] = []
     for (const bias of HDR_BIASES) {
-      const frame = captureBracket(activeShot, bias)
+      const frame = createBracketFrame(activeShot, baseCapture, bias)
       if (frame) {
         capturedFrames.push(frame)
       }
-      await wait(90)
+      await wait(35)
     }
 
     if (capturedFrames.length === HDR_BIASES.length) {
