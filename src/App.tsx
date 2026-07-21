@@ -431,7 +431,7 @@ function App() {
 
           <div className="button-row">
             <button className="primary" onClick={() => void captureHdrBurst()} disabled={!cameraReady || capturing}>
-              {capturing ? 'Capturing HDR burst...' : 'Capture wide-angle HDR'}
+              {capturing ? 'Capturing...' : 'Capture wide-angle HDR'}
             </button>
             <button className="secondary" onClick={clearCurrentShot} disabled={capturing || !activeShotStatus?.capturedBrackets}>
               Retake current
