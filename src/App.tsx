@@ -6,6 +6,7 @@ import {
   reviewPhotoSession,
   summarizeShotStatuses,
 } from './lib/aiBackend'
+import { clamp } from './lib/image'
 import { generateHdrListingPhotos } from './lib/render'
 import type {
   AiPhotoSessionResult,
@@ -21,12 +22,37 @@ const STYLE_PRESETS: ImagingRequest['stylePreset'][] = ['MLS Clean', 'Luxury Edi
 const REQUIRED_SHOTS = 3
 const HDR_BIASES: CapturedFrame['exposureBias'][] = [-1, 0, 1]
 
-type AppStage = 'capture' | 'processing' | 'gallery'
+type AppStage = 'intro' | 'capture' | 'processing' | 'gallery'
 
 type BaseCapture = {
   imageData: ImageData
   width: number
   height: number
+}
+
+type CameraCapabilities = MediaTrackCapabilities & {
+  exposureMode?: string[]
+  exposureCompensation?: {
+    min: number
+    max: number
+    step?: number
+  }
+  zoom?: {
+    min: number
+    max: number
+    step?: number
+  }
+}
+
+type CameraSettings = MediaTrackSettings & {
+  exposureCompensation?: number
+  zoom?: number
+}
+
+type AdvancedCameraConstraints = MediaTrackConstraintSet & {
+  exposureMode?: string
+  exposureCompensation?: number
+  zoom?: number
 }
 
 const exposureLabel = (bias: CapturedFrame['exposureBias']): string => {
@@ -57,12 +83,72 @@ const applyExposureBias = (
 
 const wait = (ms: number): Promise<void> => new Promise((resolve) => window.setTimeout(resolve, ms))
 
+const baseCameraConstraints = {
+  facingMode: { ideal: 'environment' },
+  width: { ideal: 3840 },
+  height: { ideal: 2160 },
+  aspectRatio: { ideal: 16 / 9 },
+}
+
+const isUltraWideLabel = (label: string): boolean =>
+  /ultra|0\.5|0,5|wide angle|ultrawide/i.test(label)
+
+const configureWidestLens = async (stream: MediaStream): Promise<string | null> => {
+  const track = stream.getVideoTracks()[0]
+  if (!track?.getCapabilities) {
+    return null
+  }
+
+  const capabilities = track.getCapabilities() as CameraCapabilities
+  if (!capabilities.zoom) {
+    return null
+  }
+
+  const constraints: AdvancedCameraConstraints = {
+    zoom: capabilities.zoom.min,
+  }
+  await track.applyConstraints({ advanced: [constraints] })
+  return `Wide lens requested with ${capabilities.zoom.min}x zoom.`
+}
+
+const getBestWideCameraStream = async (): Promise<{ stream: MediaStream; note: string | null }> => {
+  const initialStream = await navigator.mediaDevices.getUserMedia({
+    video: baseCameraConstraints,
+    audio: false,
+  })
+
+  const devices = await navigator.mediaDevices.enumerateDevices().catch(() => [])
+  const ultraWideDevice = devices.find(
+    (device) => device.kind === 'videoinput' && isUltraWideLabel(device.label),
+  )
+
+  let stream = initialStream
+  let note: string | null = null
+  if (ultraWideDevice?.deviceId) {
+    initialStream.getTracks().forEach((track) => track.stop())
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        ...baseCameraConstraints,
+        deviceId: { exact: ultraWideDevice.deviceId },
+      },
+      audio: false,
+    })
+    note = `Using ${ultraWideDevice.label}.`
+  }
+
+  const zoomNote = await configureWidestLens(stream).catch(() => null)
+  return {
+    stream,
+    note: note ?? zoomNote,
+  }
+}
+
 function App() {
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const framesRef = useRef<CapturedFrame[]>([])
 
-  const [stage, setStage] = useState<AppStage>('capture')
+  const [stage, setStage] = useState<AppStage>('intro')
   const [cameraReady, setCameraReady] = useState(false)
   const [sessionStarted, setSessionStarted] = useState(false)
   const [activeShotIndex, setActiveShotIndex] = useState(0)
@@ -72,6 +158,9 @@ function App() {
   const [liveGuidance, setLiveGuidance] = useState<CaptureGuidance | null>(null)
   const [capturing, setCapturing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [cameraNote, setCameraNote] = useState<string | null>(null)
+  const [exposureLocked, setExposureLocked] = useState(false)
+  const [isPortrait, setIsPortrait] = useState(false)
   const [imagingRequest, setImagingRequest] = useState<ImagingRequest>({
     roomType: 'Living room',
     listingGoal: 'Create bright, accurate, professional listing photos that make the room feel spacious, clean, and true to life.',
@@ -88,24 +177,20 @@ function App() {
   const canGenerate = completedRequiredShots >= REQUIRED_SHOTS
 
   useEffect(() => {
+    if (stage !== 'capture') {
+      return
+    }
+
     let mounted = true
 
     const initializeCamera = async (): Promise<void> => {
       if (!navigator.mediaDevices?.getUserMedia) {
-        setError('This browser does not support live camera capture.')
+        setError('This browser does not support live camera capture. Use Safari/Chrome over HTTPS.')
         return
       }
 
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: { ideal: 'environment' },
-            width: { ideal: 3840 },
-            height: { ideal: 2160 },
-            aspectRatio: { ideal: 16 / 9 },
-          },
-          audio: false,
-        })
+        const { stream, note } = await getBestWideCameraStream()
 
         if (!mounted) {
           stream.getTracks().forEach((track) => track.stop())
@@ -120,6 +205,7 @@ function App() {
         }
 
         setCameraReady(true)
+        setCameraNote(note ?? 'Using the widest camera settings exposed by this browser.')
       } catch {
         setError('Camera access failed. Allow camera permission and reload Photon.')
       }
@@ -131,8 +217,36 @@ function App() {
       const stream = streamRef.current
       stream?.getTracks().forEach((track) => track.stop())
       streamRef.current = null
+      setCameraReady(false)
+      setExposureLocked(false)
+    }
+  }, [stage])
+
+  useEffect(() => {
+    const updateOrientation = (): void => {
+      setIsPortrait(window.innerHeight > window.innerWidth)
+    }
+
+    updateOrientation()
+    window.addEventListener('resize', updateOrientation)
+    window.addEventListener('orientationchange', updateOrientation)
+    return () => {
+      window.removeEventListener('resize', updateOrientation)
+      window.removeEventListener('orientationchange', updateOrientation)
     }
   }, [])
+
+  useEffect(() => {
+    if (stage === 'capture' && cameraReady && !sessionStarted && framesRef.current.length === 0) {
+      framesRef.current = []
+      setFrames([])
+      setPhotos([])
+      setSessionResult(null)
+      setError(null)
+      setSessionStarted(true)
+      setActiveShotIndex(0)
+    }
+  }, [cameraReady, sessionStarted, stage])
 
   useEffect(() => {
     if (stage !== 'capture' || !cameraReady || !activeShot) {
@@ -233,6 +347,49 @@ function App() {
     setActiveShotIndex(0)
   }
 
+  const beginCaptureExperience = async (): Promise<void> => {
+    setError(null)
+    setCameraNote(null)
+    setStage('capture')
+
+    await document.documentElement.requestFullscreen?.().catch(() => undefined)
+    await screen.orientation?.lock?.('landscape').catch(() => {
+      setCameraNote('Rotate your phone to landscape if your browser does not lock orientation automatically.')
+    })
+  }
+
+  const lockExposure = async (): Promise<void> => {
+    const track = streamRef.current?.getVideoTracks()[0]
+    if (!track?.getCapabilities) {
+      setCameraNote('Exposure lock is not exposed by this browser. Hold steady before capture.')
+      return
+    }
+
+    const capabilities = track.getCapabilities() as CameraCapabilities
+    const settings = track.getSettings() as CameraSettings
+    const constraints: AdvancedCameraConstraints = {}
+
+    if (capabilities.exposureMode?.includes('manual')) {
+      constraints.exposureMode = 'manual'
+    }
+    if (capabilities.exposureCompensation) {
+      constraints.exposureCompensation = clamp(
+        settings.exposureCompensation ?? 0,
+        capabilities.exposureCompensation.min,
+        capabilities.exposureCompensation.max,
+      )
+    }
+
+    if (!Object.keys(constraints).length) {
+      setCameraNote('Exposure lock is not supported by this browser/camera. Photon will still HDR-merge brackets.')
+      return
+    }
+
+    await track.applyConstraints({ advanced: [constraints] })
+    setExposureLocked(true)
+    setCameraNote('Exposure locked for consistent HDR brackets.')
+  }
+
   const captureHdrBurst = async (): Promise<void> => {
     if (!sessionStarted) {
       startSession()
@@ -319,6 +476,109 @@ function App() {
     link.href = photo.dataUrl
     link.download = `photon-${photo.angleLabel.toLowerCase().replace(/\s+/g, '-')}.jpg`
     link.click()
+  }
+
+  if (stage === 'intro') {
+    return (
+      <main className="intro-screen">
+        <section className="intro-card">
+          <span className="eyebrow">Photon</span>
+          <h1>Let's start with the living room.</h1>
+          <p>
+            Rotate your phone to landscape. Photon will guide each angle, lock exposure when supported,
+            and capture wide HDR brackets for listing-ready photos.
+          </p>
+          <button className="primary intro-button" onClick={() => void beginCaptureExperience()}>
+            Begin
+          </button>
+        </section>
+      </main>
+    )
+  }
+
+  if (stage === 'capture') {
+    return (
+      <main className="capture-shell">
+        <video className="capture-video" ref={videoRef} playsInline autoPlay muted />
+
+        <header className="capture-header">
+          <div>
+            <span className="eyebrow">Current room</span>
+            <strong>{imagingRequest.roomType}</strong>
+          </div>
+          <div className="capture-header-actions">
+            <span>
+              {completedRequiredShots}/{REQUIRED_SHOTS} required
+            </span>
+            <button onClick={() => void lockExposure()} disabled={!cameraReady || exposureLocked}>
+              {exposureLocked ? 'Exposure locked' : 'Lock exposure'}
+            </button>
+          </div>
+        </header>
+
+        {isPortrait && (
+          <div className="rotate-overlay">
+            <strong>Rotate to landscape</strong>
+            <p>Photon captures listing photos horizontally for a wider, professional frame.</p>
+          </div>
+        )}
+
+        {error && <div className="capture-alert">{error}</div>}
+        {cameraNote && <div className="camera-note">{cameraNote}</div>}
+
+        <footer className="capture-footer">
+          {activeShot && (
+            <div className="angle-panel">
+              <span className="eyebrow">Angle needed</span>
+              <h2>{activeShot.label}</h2>
+              <p>{activeShot.placement}</p>
+              <p>{activeShot.composition}</p>
+            </div>
+          )}
+
+          {liveGuidance && (
+            <div className={`guidance-card compact ${liveGuidance.tone}`}>
+              <strong>{liveGuidance.headline}</strong>
+              <span>{liveGuidance.brightnessLabel} light • {liveGuidance.qualityScore}% quality</span>
+            </div>
+          )}
+
+          <div className="capture-progress">
+            <div className="progress-track" aria-label="Shot coverage progress">
+              <div className="progress-fill" style={{ width: `${progressPercent}%` }} />
+            </div>
+            <span>
+              {activeShotStatus?.capturedBrackets ?? 0}/3 HDR brackets for this angle
+            </span>
+          </div>
+
+          <div className="capture-controls">
+            <button className="ghost" onClick={goToPreviousShot} disabled={activeShotIndex === 0 || capturing}>
+              Previous
+            </button>
+            <button className="capture-button" onClick={() => void captureHdrBurst()} disabled={!cameraReady || capturing}>
+              {capturing ? 'Capturing' : 'Capture'}
+            </button>
+            <button
+              className="ghost"
+              onClick={goToNextShot}
+              disabled={activeShotIndex === shotPlan.length - 1 || capturing}
+            >
+              Next
+            </button>
+          </div>
+
+          <div className="capture-secondary-actions">
+            <button onClick={clearCurrentShot} disabled={capturing || !activeShotStatus?.capturedBrackets}>
+              Retake
+            </button>
+            <button className="primary" onClick={() => void processPhotos()} disabled={!canGenerate || capturing}>
+              Generate photos
+            </button>
+          </div>
+        </footer>
+      </main>
+    )
   }
 
   return (
