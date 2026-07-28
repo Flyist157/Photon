@@ -104,7 +104,7 @@ const configureWidestLens = async (stream: MediaStream): Promise<string | null> 
     zoom: capabilities.zoom.min,
   }
   await track.applyConstraints({ advanced: [constraints] })
-  return `Wide lens requested with ${capabilities.zoom.min}x zoom.`
+  return null
 }
 
 const getBestWideCameraStream = async (): Promise<{ stream: MediaStream; note: string | null }> => {
@@ -210,7 +210,7 @@ function App() {
         }
 
         setCameraReady(true)
-        setCameraNote(note ?? 'Using the widest camera settings exposed by this browser.')
+        setCameraNote(note)
       } catch {
         setError('Camera access failed. Allow camera permission and reload Photon.')
       }
@@ -554,15 +554,12 @@ function App() {
             <div className="angle-panel">
               <span className="eyebrow">Angle needed</span>
               <h2>{activeShot.label}</h2>
-              <p>{activeShot.placement}</p>
               <p>{activeShot.composition}</p>
-            </div>
-          )}
-
-          {liveGuidance && (
-            <div className={`guidance-card compact ${liveGuidance.tone}`}>
-              <strong>{liveGuidance.headline}</strong>
-              <span>{liveGuidance.brightnessLabel} light • {liveGuidance.qualityScore}% quality</span>
+              {liveGuidance && (
+                <span className={`mini-guidance ${liveGuidance.tone}`}>
+                  {liveGuidance.headline} • {liveGuidance.brightnessLabel} • {liveGuidance.qualityScore}%
+                </span>
+              )}
             </div>
           )}
 
