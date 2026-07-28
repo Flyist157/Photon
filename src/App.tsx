@@ -17,8 +17,6 @@ import type {
   StyledPhoto,
 } from './types'
 
-const ROOM_TYPES = ['Living room', 'Bedroom', 'Kitchen', 'Bathroom', 'Office', 'Retail space', 'Interior room']
-const STYLE_PRESETS: ImagingRequest['stylePreset'][] = ['MLS Clean', 'Luxury Editorial', 'Bright Rental']
 const REQUIRED_SHOTS = 3
 const HDR_BIASES: CapturedFrame['exposureBias'][] = [-1, 0, 1]
 
@@ -53,16 +51,6 @@ type AdvancedCameraConstraints = MediaTrackConstraintSet & {
   exposureMode?: string
   exposureCompensation?: number
   zoom?: number
-}
-
-const exposureLabel = (bias: CapturedFrame['exposureBias']): string => {
-  if (bias < 0) {
-    return 'highlight-safe'
-  }
-  if (bias > 0) {
-    return 'shadow-lift'
-  }
-  return 'neutral'
 }
 
 const applyExposureBias = (
@@ -161,7 +149,7 @@ function App() {
   const [cameraNote, setCameraNote] = useState<string | null>(null)
   const [exposureLocked, setExposureLocked] = useState(false)
   const [isPortrait, setIsPortrait] = useState(false)
-  const [imagingRequest, setImagingRequest] = useState<ImagingRequest>({
+  const [imagingRequest] = useState<ImagingRequest>({
     roomType: 'Living room',
     listingGoal: 'Create bright, accurate, professional listing photos that make the room feel spacious, clean, and true to life.',
     stylePreset: 'MLS Clean',
@@ -319,22 +307,6 @@ function App() {
     [],
   )
 
-  const startSession = (): void => {
-    if (!cameraReady) {
-      setError('Camera is still warming up.')
-      return
-    }
-
-    framesRef.current = []
-    setFrames([])
-    setPhotos([])
-    setSessionResult(null)
-    setError(null)
-    setStage('capture')
-    setSessionStarted(true)
-    setActiveShotIndex(0)
-  }
-
   const beginCaptureExperience = async (): Promise<void> => {
     framesRef.current = []
     setFrames([])
@@ -348,7 +320,10 @@ function App() {
     setStage('capture')
 
     await document.documentElement.requestFullscreen?.().catch(() => undefined)
-    await screen.orientation?.lock?.('landscape').catch(() => {
+    const orientation = screen.orientation as ScreenOrientation & {
+      lock?: (orientation: OrientationLockType) => Promise<void>
+    }
+    await orientation.lock?.('landscape').catch(() => {
       setCameraNote('Rotate your phone to landscape if your browser does not lock orientation automatically.')
     })
   }
@@ -387,7 +362,7 @@ function App() {
 
   const captureHdrBurst = async (): Promise<void> => {
     if (!sessionStarted) {
-      startSession()
+      setSessionStarted(true)
     }
     if (!activeShot) {
       return
@@ -587,153 +562,6 @@ function App() {
       </header>
 
       {error && <div className="error-banner">{error}</div>}
-
-      {stage === 'capture' && (
-        <section className="card">
-          <h2>1) Guided HDR photo positions</h2>
-          <p className="hint">
-            Hold the phone landscape at chest height. Capture the three required positions first, then add
-            recommended angles for a stronger listing set.
-          </p>
-
-          <div className="prompt-panel">
-            <label>
-              Room type
-              <select
-                value={imagingRequest.roomType}
-                onChange={(event) =>
-                  setImagingRequest((current) => ({ ...current, roomType: event.target.value }))
-                }
-              >
-                {ROOM_TYPES.map((roomType) => (
-                  <option key={roomType} value={roomType}>
-                    {roomType}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Editing goal
-              <textarea
-                value={imagingRequest.listingGoal}
-                onChange={(event) =>
-                  setImagingRequest((current) => ({ ...current, listingGoal: event.target.value }))
-                }
-                rows={3}
-              />
-            </label>
-            <label>
-              Photo style
-              <select
-                value={imagingRequest.stylePreset}
-                onChange={(event) =>
-                  setImagingRequest((current) => ({
-                    ...current,
-                    stylePreset: event.target.value as ImagingRequest['stylePreset'],
-                  }))
-                }
-              >
-                {STYLE_PRESETS.map((preset) => (
-                  <option key={preset} value={preset}>
-                    {preset}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-
-          <div className="preview-wrap">
-            <video ref={videoRef} playsInline autoPlay muted />
-          </div>
-
-          {activeShot && (
-            <article className="shot-card">
-              <div>
-                <span className="eyebrow">Current position</span>
-                <h3>{activeShot.label}</h3>
-                <p>{activeShot.placement}</p>
-              </div>
-              <ul>
-                <li>{activeShot.composition}</li>
-                <li>{activeShot.coaching}</li>
-                <li>HDR burst: {HDR_BIASES.map(exposureLabel).join(' + ')}</li>
-              </ul>
-            </article>
-          )}
-
-          {liveGuidance && (
-            <div className={`guidance-card ${liveGuidance.tone}`}>
-              <div>
-                <span className="eyebrow">Live photo coach</span>
-                <strong>{liveGuidance.headline}</strong>
-                <p>{liveGuidance.detail}</p>
-              </div>
-              <div className="guidance-stats">
-                <span>{liveGuidance.qualityScore}% quality</span>
-                <span>{liveGuidance.brightnessLabel} light</span>
-                <span>{liveGuidance.nextShot}</span>
-              </div>
-            </div>
-          )}
-
-          <div className="progress-track" aria-label="Shot coverage progress">
-            <div className="progress-fill" style={{ width: `${progressPercent}%` }} />
-          </div>
-          <div className="meta-row">
-            <span>
-              Required: {completedRequiredShots}/{REQUIRED_SHOTS}
-            </span>
-            <span>
-              Total positions: {completedShots}/{shotPlan.length}
-            </span>
-          </div>
-
-          <div className="shot-list">
-            {shotStatuses.map((shot, index) => (
-              <button
-                className={`shot-list-item ${index === activeShotIndex ? 'active' : ''} ${shot.complete ? 'complete' : ''}`}
-                key={shot.id}
-                onClick={() => setActiveShotIndex(index)}
-              >
-                <span>{shot.label}</span>
-                <small>
-                  {shot.priority} • {shot.capturedBrackets}/3 brackets
-                </small>
-              </button>
-            ))}
-          </div>
-
-          <div className="button-row">
-            <button onClick={startSession} disabled={!cameraReady || capturing}>
-              {sessionStarted ? 'Restart photo session' : 'Start photo session'}
-            </button>
-            <button
-              onClick={goToPreviousShot}
-              disabled={activeShotIndex === 0 || capturing}
-            >
-              Previous position
-            </button>
-            <button
-              onClick={goToNextShot}
-              disabled={activeShotIndex === shotPlan.length - 1 || capturing}
-            >
-              Next position
-            </button>
-          </div>
-
-          <div className="button-row">
-            <button className="primary" onClick={() => void captureHdrBurst()} disabled={!cameraReady || capturing}>
-              {capturing ? 'Capturing...' : 'Capture this HDR angle'}
-            </button>
-            <button className="secondary" onClick={clearCurrentShot} disabled={capturing || !activeShotStatus?.capturedBrackets}>
-              Retake current
-            </button>
-            <button className="primary" onClick={() => void processPhotos()} disabled={!canGenerate || capturing}>
-              Generate enhanced listing photos
-            </button>
-          </div>
-        </section>
-      )}
 
       {stage === 'processing' && (
         <section className="card center">
