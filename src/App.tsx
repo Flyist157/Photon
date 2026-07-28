@@ -321,7 +321,7 @@ function App() {
 
     await document.documentElement.requestFullscreen?.().catch(() => undefined)
     const orientation = screen.orientation as ScreenOrientation & {
-      lock?: (orientation: OrientationLockType) => Promise<void>
+      lock?: (orientation: string) => Promise<void>
     }
     await orientation.lock?.('landscape').catch(() => {
       setCameraNote('Rotate your phone to landscape if your browser does not lock orientation automatically.')
