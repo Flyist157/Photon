@@ -5,9 +5,10 @@ Photon is a mobile-first real-estate imaging app that guides a user to the best 
 ## What it does
 
 1. **Guides optimal photo positions**
-   - Starts with a simple room prompt, then opens the camera after the user taps Begin.
+   - Starts with a home-screen planner for bedrooms, bathrooms, kitchens, living/great rooms, yards, and exterior angles.
+   - Builds an ordered workflow that guides interiors first, then yard and exterior shots.
    - Coaches the user through hero corner, window-balanced, opposite-corner, entry-context, and feature-detail angles.
-   - Prioritizes the three required angles first, with optional supporting shots for stronger listing coverage.
+   - Prioritizes required angles for every selected room/area, with optional supporting shots for stronger listing coverage.
    - Gives live feedback for low light, window glare, composition, and capture readiness.
 
 2. **Accepts real-estate prompting**

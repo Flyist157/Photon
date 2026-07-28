@@ -13,12 +13,20 @@ import type {
   CaptureGuidance,
   CapturedFrame,
   ImagingRequest,
+  PropertyCapturePlan,
   ShotPosition,
   StyledPhoto,
 } from './types'
 
-const REQUIRED_SHOTS = 3
 const HDR_BIASES: CapturedFrame['exposureBias'][] = [-1, 0, 1]
+const CAPTURE_PLAN_FIELDS: { key: keyof PropertyCapturePlan; label: string; min: number; max: number }[] = [
+  { key: 'livingRooms', label: 'Living / great rooms', min: 0, max: 6 },
+  { key: 'kitchens', label: 'Kitchens', min: 0, max: 4 },
+  { key: 'bedrooms', label: 'Bedrooms', min: 0, max: 12 },
+  { key: 'bathrooms', label: 'Bathrooms', min: 0, max: 10 },
+  { key: 'yards', label: 'Yards / outdoor areas', min: 0, max: 6 },
+  { key: 'exteriorAngles', label: 'Exterior angles', min: 0, max: 8 },
+]
 
 type AppStage = 'intro' | 'capture' | 'processing' | 'gallery'
 
@@ -154,15 +162,24 @@ function App() {
     listingGoal: 'Create bright, accurate, professional listing photos that make the room feel spacious, clean, and true to life.',
     stylePreset: 'MLS Clean',
   })
+  const [propertyPlan, setPropertyPlan] = useState<PropertyCapturePlan>({
+    livingRooms: 1,
+    kitchens: 1,
+    bedrooms: 3,
+    bathrooms: 2,
+    yards: 1,
+    exteriorAngles: 4,
+  })
 
-  const shotPlan = useMemo(() => buildGuidedShotPlan(imagingRequest), [imagingRequest])
+  const shotPlan = useMemo(() => buildGuidedShotPlan(imagingRequest, propertyPlan), [imagingRequest, propertyPlan])
   const activeShot = shotPlan[activeShotIndex] ?? shotPlan[0]
   const shotStatuses = useMemo(() => summarizeShotStatuses(shotPlan, frames), [frames, shotPlan])
   const completedShots = shotStatuses.filter((shot) => shot.complete).length
   const completedRequiredShots = shotStatuses.filter((shot) => shot.priority === 'required' && shot.complete).length
+  const requiredShotTotal = shotStatuses.filter((shot) => shot.priority === 'required').length
   const activeShotStatus = shotStatuses[activeShotIndex] ?? shotStatuses[0]
-  const progressPercent = Math.round((completedShots / shotPlan.length) * 100)
-  const canGenerate = completedRequiredShots >= REQUIRED_SHOTS
+  const progressPercent = shotPlan.length ? Math.round((completedShots / shotPlan.length) * 100) : 0
+  const canGenerate = requiredShotTotal > 0 && completedRequiredShots >= requiredShotTotal
 
   useEffect(() => {
     if (stage !== 'capture') {
@@ -422,7 +439,7 @@ function App() {
 
   const processPhotos = async (): Promise<void> => {
     if (!canGenerate) {
-      setError(`Capture the ${REQUIRED_SHOTS} required HDR positions before generating photos.`)
+      setError(`Capture the ${requiredShotTotal} required HDR positions before generating photos.`)
       return
     }
 
@@ -448,17 +465,50 @@ function App() {
     link.click()
   }
 
+  const updatePropertyPlan = (key: keyof PropertyCapturePlan, delta: number): void => {
+    const field = CAPTURE_PLAN_FIELDS.find((item) => item.key === key)
+    if (!field) {
+      return
+    }
+
+    setPropertyPlan((current) => ({
+      ...current,
+      [key]: clamp(current[key] + delta, field.min, field.max),
+    }))
+  }
+
   if (stage === 'intro') {
     return (
       <main className="intro-screen">
         <section className="intro-card">
           <span className="eyebrow">Photon</span>
-          <h1>Let's start with the living room.</h1>
+          <h1>Build your shot list.</h1>
           <p>
-            Rotate your phone to landscape. Photon will guide each angle, lock exposure when supported,
-            and capture wide HDR brackets for listing-ready photos.
+            Tell Photon what spaces to capture. The app will guide you from interior rooms to yard and
+            exterior angles, then capture wide HDR brackets for each shot.
           </p>
-          <button className="primary intro-button" onClick={() => void beginCaptureExperience()}>
+
+          <div className="plan-grid">
+            {CAPTURE_PLAN_FIELDS.map((field) => (
+              <div className="plan-row" key={field.key}>
+                <span>{field.label}</span>
+                <div className="stepper">
+                  <button onClick={() => updatePropertyPlan(field.key, -1)} disabled={propertyPlan[field.key] <= field.min}>
+                    -
+                  </button>
+                  <strong>{propertyPlan[field.key]}</strong>
+                  <button onClick={() => updatePropertyPlan(field.key, 1)} disabled={propertyPlan[field.key] >= field.max}>
+                    +
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <p className="plan-summary">
+            {shotPlan.length} guided angles • {requiredShotTotal} required captures • interior to exterior workflow
+          </p>
+          <button className="primary intro-button" onClick={() => void beginCaptureExperience()} disabled={!requiredShotTotal}>
             Begin
           </button>
         </section>
@@ -474,11 +524,12 @@ function App() {
         <header className="capture-header">
           <div>
             <span className="eyebrow">Current room</span>
-            <strong>{imagingRequest.roomType}</strong>
+            <strong>{activeShot?.roomLabel ?? 'Property'}</strong>
+            <span>{activeShot?.zone === 'exterior' ? 'Exterior' : 'Interior'}</span>
           </div>
           <div className="capture-header-actions">
             <span>
-              {completedRequiredShots}/{REQUIRED_SHOTS} required
+              {completedRequiredShots}/{requiredShotTotal} required
             </span>
             <button onClick={() => void lockExposure()} disabled={!cameraReady || exposureLocked}>
               {exposureLocked ? 'Exposure locked' : 'Lock exposure'}
@@ -520,7 +571,7 @@ function App() {
               <div className="progress-fill" style={{ width: `${progressPercent}%` }} />
             </div>
             <span>
-              Required: {completedRequiredShots}/{REQUIRED_SHOTS} •{' '}
+              Required: {completedRequiredShots}/{requiredShotTotal} •{' '}
               {activeShotStatus?.capturedBrackets ?? 0}/3 HDR brackets for this angle
             </span>
           </div>
@@ -529,7 +580,7 @@ function App() {
             <button className="ghost" onClick={goToPreviousShot} disabled={activeShotIndex === 0 || capturing}>
               Previous
             </button>
-            <button className="capture-button" onClick={() => void captureHdrBurst()} disabled={!cameraReady || capturing}>
+            <button className="capture-button" onClick={() => void captureHdrBurst()} disabled={!cameraReady || capturing || !activeShot}>
               {capturing ? 'Capturing' : cameraReady ? 'Capture' : 'Camera'}
             </button>
             <button

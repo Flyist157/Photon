@@ -39,6 +39,53 @@
   font-size: 1.05rem;
 }
 
+.plan-grid {
+  display: grid;
+  gap: 0.65rem;
+  margin: 1.25rem 0;
+}
+
+.plan-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid #dbeafe;
+  border-radius: 16px;
+  background: #f8fafc;
+  text-align: left;
+}
+
+.plan-row > span {
+  color: #1e293b;
+  font-weight: 800;
+}
+
+.stepper {
+  display: grid;
+  grid-template-columns: 38px 42px 38px;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.stepper button {
+  padding: 0.45rem 0;
+  border-radius: 999px;
+}
+
+.stepper strong {
+  color: #0f172a;
+  font-size: 1.15rem;
+  text-align: center;
+}
+
+.plan-summary {
+  margin-bottom: 1rem !important;
+  color: #2563eb !important;
+  font-weight: 800;
+}
+
 .intro-button {
   min-width: 138px;
   font-size: 1.05rem;

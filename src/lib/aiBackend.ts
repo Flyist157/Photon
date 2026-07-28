@@ -6,6 +6,7 @@ import type {
   ImagingRequest,
   PhotoBrief,
   PhotoEditPlan,
+  PropertyCapturePlan,
   SessionInsight,
   ShotPosition,
   ShotStatus,
@@ -137,52 +138,108 @@ const averageStats = (stats: ImageStats[]): ImageStats => {
   }
 }
 
-export const buildGuidedShotPlan = (request: ImagingRequest): ShotPosition[] => [
+const countRange = (count: number): number[] => Array.from({ length: Math.max(0, count) }, (_, index) => index + 1)
+
+const makeInteriorShots = (
+  roomLabel: string,
+  roomSlug: string,
+  baseHeading: number,
+): ShotPosition[] => [
   {
-    id: 'hero-corner',
-    label: 'Hero corner wide',
-    targetHeading: 0,
-    placement: 'Stand in the cleanest back corner or doorway, phone at chest height, held landscape.',
-    composition: `Show the widest view of the ${request.roomType.toLowerCase()} with two walls and as much floor as possible.`,
+    id: `${roomSlug}-hero`,
+    label: `${roomLabel} hero wide`,
+    roomLabel,
+    zone: 'interior',
+    targetHeading: baseHeading,
+    placement: `Stand in the cleanest back corner or doorway of ${roomLabel.toLowerCase()}, phone at chest height, held landscape.`,
+    composition: `Show the widest view of ${roomLabel.toLowerCase()} with two walls and as much floor as possible.`,
     coaching: 'Step back until vertical lines feel straight; avoid pointing down at the floor.',
     priority: 'required',
   },
   {
-    id: 'window-pull',
-    label: 'Window-balanced HDR',
-    targetHeading: 45,
-    placement: 'Stand diagonally opposite the main window or brightest wall.',
-    composition: 'Include the window edge without aiming directly into glare.',
-    coaching: 'Tap the phone screen near the window if your browser supports exposure lock, then capture.',
-    priority: 'required',
-  },
-  {
-    id: 'opposite-corner',
-    label: 'Opposite corner depth',
-    targetHeading: 180,
-    placement: 'Move to the opposite corner from the hero shot.',
-    composition: 'Capture depth back toward the entry path so buyers understand the room shape.',
-    coaching: 'Keep the phone level and include a small strip of ceiling for scale.',
-    priority: 'required',
-  },
-  {
-    id: 'entry-context',
-    label: 'Entry context',
-    targetHeading: 250,
-    placement: 'Stand just outside or inside the room entrance.',
-    composition: 'Frame the room from the way a buyer first walks in.',
-    coaching: 'Back up until the doorway or transition is visible but not blocking the main view.',
+    id: `${roomSlug}-window-or-feature`,
+    label: `${roomLabel} light/detail`,
+    roomLabel,
+    zone: 'interior',
+    targetHeading: baseHeading + 45,
+    placement: `Move diagonally opposite the main window, fixture, vanity, cabinetry, or strongest feature in ${roomLabel.toLowerCase()}.`,
+    composition: 'Include the bright opening or selling feature without aiming directly into glare.',
+    coaching: 'Lock exposure if possible, then keep the phone level and steady.',
     priority: 'recommended',
   },
   {
-    id: 'feature-detail',
-    label: 'Feature detail',
-    targetHeading: 315,
-    placement: 'Move near the best selling feature: fireplace, cabinetry, window, fixture, or built-in.',
-    composition: 'Capture a tasteful supporting angle, not a close-up crop.',
-    coaching: 'Keep the feature in the center third and leave enough surrounding room context.',
-    priority: 'recommended',
+    id: `${roomSlug}-opposite`,
+    label: `${roomLabel} opposite depth`,
+    roomLabel,
+    zone: 'interior',
+    targetHeading: baseHeading + 180,
+    placement: `Move to the opposite side of ${roomLabel.toLowerCase()} from the hero angle.`,
+    composition: 'Capture depth back toward the entry path so viewers understand the room shape.',
+    coaching: 'Include a little ceiling and floor for scale; keep verticals upright.',
+    priority: 'required',
   },
+]
+
+const makeYardShots = (index: number): ShotPosition[] => {
+  const roomLabel = index === 1 ? 'Yard' : `Yard ${index}`
+  const roomSlug = `yard-${index}`
+  return [
+    {
+      id: `${roomSlug}-overview`,
+      label: `${roomLabel} overview`,
+      roomLabel,
+      zone: 'exterior',
+      targetHeading: 20 + index * 40,
+      placement: `Stand at the widest usable corner of ${roomLabel.toLowerCase()}.`,
+      composition: 'Show usable outdoor space, boundaries, landscaping, and patio/deck context.',
+      coaching: 'Avoid shooting straight into the sun; keep the horizon level.',
+      priority: 'required',
+    },
+    {
+      id: `${roomSlug}-feature`,
+      label: `${roomLabel} feature angle`,
+      roomLabel,
+      zone: 'exterior',
+      targetHeading: 80 + index * 40,
+      placement: 'Move closer to the best exterior feature: patio, view, lawn, garden, pool, or outdoor seating.',
+      composition: 'Show the feature with enough surrounding context to feel spacious.',
+      coaching: 'Use HDR if sky is bright and foreground is shaded.',
+      priority: 'recommended',
+    },
+  ]
+}
+
+const exteriorAngleLabel = (index: number): string =>
+  ['Front exterior', 'Left exterior', 'Rear exterior', 'Right exterior'][index - 1] ?? `Exterior angle ${index}`
+
+export const buildGuidedShotPlan = (
+  _request: ImagingRequest,
+  capturePlan: PropertyCapturePlan,
+): ShotPosition[] => [
+  ...countRange(capturePlan.livingRooms).flatMap((index) =>
+    makeInteriorShots(index === 1 ? 'Living / great room' : `Living / great room ${index}`, `living-${index}`, index * 25),
+  ),
+  ...countRange(capturePlan.kitchens).flatMap((index) =>
+    makeInteriorShots(index === 1 ? 'Kitchen' : `Kitchen ${index}`, `kitchen-${index}`, 90 + index * 25),
+  ),
+  ...countRange(capturePlan.bedrooms).flatMap((index) =>
+    makeInteriorShots(index === 1 ? 'Primary bedroom' : `Bedroom ${index}`, `bedroom-${index}`, 150 + index * 25),
+  ),
+  ...countRange(capturePlan.bathrooms).flatMap((index) =>
+    makeInteriorShots(index === 1 ? 'Primary bathroom' : `Bathroom ${index}`, `bathroom-${index}`, 210 + index * 25),
+  ),
+  ...countRange(capturePlan.yards).flatMap(makeYardShots),
+  ...countRange(capturePlan.exteriorAngles).map((index) => ({
+    id: `exterior-${index}`,
+    label: exteriorAngleLabel(index),
+    roomLabel: 'Exterior',
+    zone: 'exterior' as const,
+    targetHeading: index * (360 / Math.max(1, capturePlan.exteriorAngles)),
+    placement: `Stand far enough back to capture the ${exteriorAngleLabel(index).toLowerCase()} cleanly.`,
+    composition: 'Show roofline, entry/yard context, and curb appeal without cutting off corners.',
+    coaching: 'Keep the phone level, avoid parked cars when possible, and use HDR for bright sky.',
+    priority: 'required' as const,
+  })),
 ]
 
 export const summarizeShotStatuses = (
