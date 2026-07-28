@@ -91,13 +91,15 @@
   padding: 0.65rem 0.75rem;
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 18px;
-  background: rgba(15, 23, 42, 0.42);
+  background: rgba(2, 6, 23, 0.72);
   backdrop-filter: blur(12px);
+  box-shadow: 0 10px 32px rgba(2, 6, 23, 0.3);
 }
 
 .capture-header strong {
   display: block;
-  font-size: 1rem;
+  font-size: 1.05rem;
+  color: #fff;
 }
 
 .capture-header-actions {
@@ -167,8 +169,9 @@
   padding: 0.85rem;
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 22px;
-  background: rgba(15, 23, 42, 0.56);
+  background: rgba(2, 6, 23, 0.78);
   backdrop-filter: blur(16px);
+  box-shadow: 0 -16px 42px rgba(2, 6, 23, 0.32);
 }
 
 .angle-panel h2 {
@@ -184,12 +187,14 @@
 .guidance-card.compact {
   margin: 0;
   padding: 0.65rem 0.7rem;
-  color: #0f172a;
+  border-color: rgba(255, 255, 255, 0.14);
+  background: rgba(15, 23, 42, 0.72);
+  color: #fff;
 }
 
 .guidance-card.compact span {
   display: block;
-  color: #334155;
+  color: #cbd5e1;
   font-size: 0.8rem;
 }
 
