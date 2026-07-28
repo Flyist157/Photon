@@ -13,11 +13,22 @@ export type CapturedFrame = {
 export type ShotPosition = {
   id: string
   label: string
+  roomLabel: string
+  zone: 'interior' | 'exterior'
   targetHeading: number
   placement: string
   composition: string
   coaching: string
   priority: 'required' | 'recommended'
+}
+
+export type PropertyCapturePlan = {
+  bedrooms: number
+  bathrooms: number
+  kitchens: number
+  livingRooms: number
+  yards: number
+  exteriorAngles: number
 }
 
 export type ShotStatus = ShotPosition & {
