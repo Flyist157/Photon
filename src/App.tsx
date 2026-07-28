@@ -237,18 +237,6 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if (stage === 'capture' && cameraReady && !sessionStarted && framesRef.current.length === 0) {
-      framesRef.current = []
-      setFrames([])
-      setPhotos([])
-      setSessionResult(null)
-      setError(null)
-      setSessionStarted(true)
-      setActiveShotIndex(0)
-    }
-  }, [cameraReady, sessionStarted, stage])
-
-  useEffect(() => {
     if (stage !== 'capture' || !cameraReady || !activeShot) {
       return
     }
@@ -348,8 +336,15 @@ function App() {
   }
 
   const beginCaptureExperience = async (): Promise<void> => {
+    framesRef.current = []
+    setFrames([])
+    setPhotos([])
+    setSessionResult(null)
+    setSessionStarted(true)
+    setActiveShotIndex(0)
     setError(null)
     setCameraNote(null)
+    setCameraReady(false)
     setStage('capture')
 
     await document.documentElement.requestFullscreen?.().catch(() => undefined)
@@ -809,7 +804,7 @@ function App() {
           </div>
 
           <div className="button-row">
-            <button onClick={startSession}>Capture another room</button>
+            <button onClick={() => void beginCaptureExperience()}>Capture another room</button>
           </div>
         </section>
       )}
