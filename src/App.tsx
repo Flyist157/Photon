@@ -494,7 +494,9 @@ function App() {
         )}
 
         {error && <div className="capture-alert">{error}</div>}
-        {cameraNote && <div className="camera-note">{cameraNote}</div>}
+        {(cameraNote || !cameraReady) && (
+          <div className="camera-note">{cameraNote ?? 'Starting camera...'}</div>
+        )}
 
         <footer className="capture-footer">
           {activeShot && (
@@ -518,6 +520,7 @@ function App() {
               <div className="progress-fill" style={{ width: `${progressPercent}%` }} />
             </div>
             <span>
+              Required: {completedRequiredShots}/{REQUIRED_SHOTS} •{' '}
               {activeShotStatus?.capturedBrackets ?? 0}/3 HDR brackets for this angle
             </span>
           </div>
@@ -527,7 +530,7 @@ function App() {
               Previous
             </button>
             <button className="capture-button" onClick={() => void captureHdrBurst()} disabled={!cameraReady || capturing}>
-              {capturing ? 'Capturing' : 'Capture'}
+              {capturing ? 'Capturing' : cameraReady ? 'Capture' : 'Camera'}
             </button>
             <button
               className="ghost"
