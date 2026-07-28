@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { PointerEvent } from 'react'
 import './App.css'
 import {
   analyzeLiveCameraFrame,
@@ -38,6 +39,8 @@ type BaseCapture = {
 
 type CameraCapabilities = MediaTrackCapabilities & {
   exposureMode?: string[]
+  focusMode?: string[]
+  pointsOfInterest?: unknown
   exposureCompensation?: {
     min: number
     max: number
@@ -50,14 +53,11 @@ type CameraCapabilities = MediaTrackCapabilities & {
   }
 }
 
-type CameraSettings = MediaTrackSettings & {
-  exposureCompensation?: number
-  zoom?: number
-}
-
 type AdvancedCameraConstraints = MediaTrackConstraintSet & {
   exposureMode?: string
+  focusMode?: string
   exposureCompensation?: number
+  pointsOfInterest?: { x: number; y: number }[]
   zoom?: number
 }
 
@@ -154,8 +154,6 @@ function App() {
   const [liveGuidance, setLiveGuidance] = useState<CaptureGuidance | null>(null)
   const [capturing, setCapturing] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [cameraNote, setCameraNote] = useState<string | null>(null)
-  const [exposureLocked, setExposureLocked] = useState(false)
   const [isPortrait, setIsPortrait] = useState(false)
   const [imagingRequest] = useState<ImagingRequest>({
     roomType: 'Living room',
@@ -195,7 +193,7 @@ function App() {
       }
 
       try {
-        const { stream, note } = await getBestWideCameraStream()
+        const { stream } = await getBestWideCameraStream()
 
         if (!mounted) {
           stream.getTracks().forEach((track) => track.stop())
@@ -210,7 +208,6 @@ function App() {
         }
 
         setCameraReady(true)
-        setCameraNote(note)
       } catch {
         setError('Camera access failed. Allow camera permission and reload Photon.')
       }
@@ -223,7 +220,6 @@ function App() {
       stream?.getTracks().forEach((track) => track.stop())
       streamRef.current = null
       setCameraReady(false)
-      setExposureLocked(false)
     }
   }, [stage])
 
@@ -332,7 +328,6 @@ function App() {
     setSessionStarted(true)
     setActiveShotIndex(0)
     setError(null)
-    setCameraNote(null)
     setCameraReady(false)
     setStage('capture')
 
@@ -340,41 +335,37 @@ function App() {
     const orientation = screen.orientation as ScreenOrientation & {
       lock?: (orientation: string) => Promise<void>
     }
-    await orientation.lock?.('landscape').catch(() => {
-      setCameraNote('Rotate your phone to landscape if your browser does not lock orientation automatically.')
-    })
+    await orientation.lock?.('landscape').catch(() => undefined)
   }
 
-  const lockExposure = async (): Promise<void> => {
+  const setExposurePoint = async (event: PointerEvent<HTMLVideoElement>): Promise<void> => {
     const track = streamRef.current?.getVideoTracks()[0]
     if (!track?.getCapabilities) {
-      setCameraNote('Exposure lock is not exposed by this browser. Hold steady before capture.')
       return
     }
 
     const capabilities = track.getCapabilities() as CameraCapabilities
-    const settings = track.getSettings() as CameraSettings
-    const constraints: AdvancedCameraConstraints = {}
-
-    if (capabilities.exposureMode?.includes('manual')) {
-      constraints.exposureMode = 'manual'
-    }
-    if (capabilities.exposureCompensation) {
-      constraints.exposureCompensation = clamp(
-        settings.exposureCompensation ?? 0,
-        capabilities.exposureCompensation.min,
-        capabilities.exposureCompensation.max,
-      )
-    }
-
-    if (!Object.keys(constraints).length) {
-      setCameraNote('Exposure lock is not supported by this browser/camera. Photon will still HDR-merge brackets.')
+    if (!('pointsOfInterest' in capabilities)) {
       return
     }
 
-    await track.applyConstraints({ advanced: [constraints] })
-    setExposureLocked(true)
-    setCameraNote('Exposure locked for consistent HDR brackets.')
+    const bounds = event.currentTarget.getBoundingClientRect()
+    const point = {
+      x: clamp((event.clientX - bounds.left) / Math.max(1, bounds.width), 0, 1),
+      y: clamp((event.clientY - bounds.top) / Math.max(1, bounds.height), 0, 1),
+    }
+    const constraints: AdvancedCameraConstraints = {
+      pointsOfInterest: [point],
+    }
+
+    if (capabilities.exposureMode?.includes('continuous')) {
+      constraints.exposureMode = 'continuous'
+    }
+    if (capabilities.focusMode?.includes('continuous')) {
+      constraints.focusMode = 'continuous'
+    }
+
+    await track.applyConstraints({ advanced: [constraints] }).catch(() => undefined)
   }
 
   const captureHdrBurst = async (): Promise<void> => {
@@ -519,7 +510,14 @@ function App() {
   if (stage === 'capture') {
     return (
       <main className="capture-shell">
-        <video className="capture-video" ref={videoRef} playsInline autoPlay muted />
+        <video
+          className="capture-video"
+          ref={videoRef}
+          playsInline
+          autoPlay
+          muted
+          onPointerDown={(event) => void setExposurePoint(event)}
+        />
 
         <header className="capture-header">
           <div>
@@ -531,9 +529,6 @@ function App() {
             <span>
               {completedRequiredShots}/{requiredShotTotal} required
             </span>
-            <button onClick={() => void lockExposure()} disabled={!cameraReady || exposureLocked}>
-              {exposureLocked ? 'Exposure locked' : 'Lock exposure'}
-            </button>
           </div>
         </header>
 
@@ -545,9 +540,6 @@ function App() {
         )}
 
         {error && <div className="capture-alert">{error}</div>}
-        {(cameraNote || !cameraReady) && (
-          <div className="camera-note">{cameraNote ?? 'Starting camera...'}</div>
-        )}
 
         <footer className="capture-footer">
           {activeShot && (

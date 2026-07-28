@@ -164,7 +164,7 @@ const makeInteriorShots = (
     targetHeading: baseHeading + 45,
     placement: `Move diagonally opposite the main window, fixture, vanity, cabinetry, or strongest feature in ${roomLabel.toLowerCase()}.`,
     composition: 'Include the bright opening or selling feature without aiming directly into glare.',
-    coaching: 'Lock exposure if possible, then keep the phone level and steady.',
+    coaching: 'Tap the key feature in the camera feed to expose for it, then keep the phone level and steady.',
     priority: 'recommended',
   },
   {

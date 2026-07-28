@@ -19,7 +19,7 @@ Photon is a mobile-first real-estate imaging app that guides a user to the best 
    - Requests the rear camera with high-res 16:9 constraints.
    - Enters a fullscreen landscape camera interface with room and angle overlays.
    - Requests the widest exposed rear camera/lens settings and minimum zoom when browser APIs allow it.
-   - Provides exposure lock when the browser exposes compatible camera controls.
+   - Supports tap-to-expose/focus directly on the camera feed when the browser exposes point-of-interest camera controls.
    - Captures highlight-safe, neutral, and shadow-lift brackets at each guided position.
    - Uses a browser-compatible synthetic bracket merge when direct phone exposure control is unavailable.
 
@@ -45,7 +45,7 @@ Then open the app in a mobile browser on the same network and grant camera permi
 ## Limitations and best-effort notes
 
 - Photon now focuses on guided capture and professional photo enhancement rather than 3D reconstruction.
-- Browser camera APIs do not reliably expose physical wide-lens selection, orientation lock, fullscreen, or manual exposure control across phones, so Photon requests those features and falls back gracefully when the browser denies them.
+- Browser camera APIs do not reliably expose physical wide-lens selection, orientation lock, fullscreen, or tap-to-expose point controls across phones, so Photon requests those features and falls back gracefully when the browser denies them.
 - Output quality depends on phone camera quality, room lighting, lens cleanliness, and steady landscape capture.
 - Photon only performs non-generative editing: light, color, white balance, denoise, sharpening, and upscaling. It does not add, remove, replace, or stage room contents.
 - The AI backend is currently a deterministic in-browser inference layer, so the app works without external credentials or network calls. It is structured around typed review and edit-plan outputs that can be replaced by a hosted model endpoint.
